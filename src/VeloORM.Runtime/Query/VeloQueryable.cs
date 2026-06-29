@@ -31,6 +31,9 @@ internal sealed class VeloQueryable<T> : IOrderedQueryable<T>
     public Expression Expression => _expression;
     public IQueryProvider Provider => _provider;
 
+    /// <summary>The owning context (used by source-generated interceptors).</summary>
+    internal VeloDbContext Context => _provider.Context;
+
     public IEnumerator<T> GetEnumerator() =>
         _provider.Execute<IEnumerable<T>>(_expression).GetEnumerator();
 

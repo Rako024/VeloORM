@@ -126,7 +126,7 @@ Execution order. After each phase: build, run tests, tick the box, write a brief
 - [x] **Phase 2** — Postgres dialect + manual materializer (Npgsql, PostgresDialect, type mapping). Integration round-trip test passes (3 tests). ✅
 - [x] **Phase 3** — Runtime engine ⭐ (IQueryable provider, expression→SQL, bound params, shape-keyed cache). Integration tests pass (15 incl. warm-cache no-recompile). ✅ *Single-table operators (Where/Select/OrderBy/ThenBy/Take/Skip/First/Single/Any/Count + string methods, IN, null checks) are implemented; Join/GroupBy currently throw `NotSupportedException` (fallback-safe, no wrong SQL) — to be completed.*
 - [x] **Phase 4** — Raw SQL escape hatch + `[InterpolatedStringHandler]` (`VeloInterpolatedSql`; `Query`/`QueryAsync`/`QuerySingleOrDefault`/`Execute`/`ExecuteAsync`/`ExecuteScalar`). 6 integration tests (function + view + injection). ✅
-- [ ] **Phase 5** — Source generator: interceptor layer.
+- [x] **Phase 5** — Source generator: interceptor layer. Incremental generator intercepts static `db.Set<T>().ToList()/First()/Single()/Count()/Any()` (no predicate/operators) via `GetInterceptableLocation()` + `[InterceptsLocation]`, baking compile-time SQL + reflection-free materializer; verified zero runtime translation. ✅ *Predicate/operator chains bail to runtime (correctness principle); compile-time predicate translation is the next enhancement.*
 - [ ] **Phase 6** — Fragment generation (bool-gated optional filters).
 - [ ] **Phase 7** — Diagnostics (VELO001) + `Query.Compile` opt-in (VELO002).
 - [ ] **Phase 8** — Code-first schema + migrations.
