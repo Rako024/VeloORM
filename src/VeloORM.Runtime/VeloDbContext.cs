@@ -11,7 +11,7 @@ namespace VeloORM.Runtime;
 /// and the process-wide shape-keyed query cache. Subclass it and expose <c>IQueryable&lt;T&gt;</c>
 /// properties, or call <see cref="Set{TEntity}"/> directly.
 /// </summary>
-public class VeloDbContext : IDbContext
+public partial class VeloDbContext : IDbContext
 {
     private readonly QueryEngine _engine;
 

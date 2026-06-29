@@ -38,6 +38,16 @@ internal static class RuntimeMaterializerFactory
         return Expression.Lambda(funcType, body, reader).Compile();
     }
 
+    /// <summary>Builds a materializer that reads a single scalar from column ordinal 0 — used by the
+    /// raw-SQL API where output column names are not known to the model.</summary>
+    public static Delegate BuildScalarByOrdinal(Type resultType)
+    {
+        var reader = Expression.Parameter(typeof(DbDataReader), "r");
+        var body = ReadOrdinal(reader, Expression.Constant(0), resultType);
+        var funcType = typeof(Func<,>).MakeGenericType(typeof(DbDataReader), resultType);
+        return Expression.Lambda(funcType, body, reader).Compile();
+    }
+
     private static Expression BuildEntity(ProjectionPlan plan, ParameterExpression reader)
     {
         var entity = plan.Entity!;
@@ -66,7 +76,15 @@ internal static class RuntimeMaterializerFactory
     {
         var ord = Expression.Variable(typeof(int), "ord");
         var assignOrd = Expression.Assign(ord, Expression.Call(reader, GetOrdinalMethod, Expression.Constant(alias)));
+        return Expression.Block(targetType, [ord], assignOrd, ReadValue(reader, ord, targetType));
+    }
 
+    /// <summary>Reads a value at a known ordinal expression (used when the ordinal is constant).</summary>
+    private static Expression ReadOrdinal(ParameterExpression reader, Expression ordinal, Type targetType) =>
+        ReadValue(reader, ordinal, targetType);
+
+    private static Expression ReadValue(ParameterExpression reader, Expression ord, Type targetType)
+    {
         var underlying = Nullable.GetUnderlyingType(targetType);
         bool isNullableValue = underlying is not null;
         bool canBeNull = isNullableValue || !targetType.IsValueType;
@@ -85,17 +103,10 @@ internal static class RuntimeMaterializerFactory
             valueExpr = nonNullType == targetType ? rawRead : Expression.Convert(rawRead, targetType);
         }
 
-        Expression result;
-        if (canBeNull)
-        {
-            var isNull = Expression.Call(reader, IsDbNullMethod, ord);
-            result = Expression.Condition(isNull, Expression.Default(targetType), valueExpr);
-        }
-        else
-        {
-            result = valueExpr;
-        }
+        if (!canBeNull)
+            return valueExpr;
 
-        return Expression.Block(targetType, [ord], assignOrd, result);
+        var isNull = Expression.Call(reader, IsDbNullMethod, ord);
+        return Expression.Condition(isNull, Expression.Default(targetType), valueExpr);
     }
 }

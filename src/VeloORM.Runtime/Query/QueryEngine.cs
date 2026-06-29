@@ -2,8 +2,8 @@ using System.Collections.Concurrent;
 using System.Data.Common;
 using System.Linq.Expressions;
 using System.Reflection;
-using VeloORM.Materialization;
 using VeloORM.Query;
+using VeloORM.Runtime.Materialization;
 
 namespace VeloORM.Runtime.Query;
 
@@ -120,10 +120,5 @@ internal sealed class QueryEngine
         public Delegate? Materializer { get; set; }
         public Type? ResultElementType { get; set; }
         public MethodInfo? RunMethod { get; set; }
-    }
-
-    private sealed class DelegateMaterializer<T>(Func<DbDataReader, T> materialize) : IMaterializer<T>
-    {
-        public T Read(DbDataReader reader) => materialize(reader);
     }
 }
