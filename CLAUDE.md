@@ -103,6 +103,16 @@ docker/docker-compose.yml         Postgres 16 + Adminer
 - Npgsql **8.0.x** (works on both `net8.0` and `net10.0`); Postgres image **16**.
 - When a decision is uncertain: pick the simplest working option, record it here,
   continue.
+- **Shape-keyed cache (Phase 3):** the cache stores the rendered SQL string + the compiled
+  materializer delegate, keyed by `ShapeKey` (structure only — parameters contribute their CLR
+  type, never their value). `QueryCompilationCount` counts cache misses; it stays constant when a
+  shape is re-run with different values. The lightweight expression→model build + value extraction
+  runs per call (values change); the expensive artifacts (SQL render, `Expression.Compile`
+  materializer) are cached. Parameters carry a translator-assigned `Ordinal` so binding order ==
+  placeholder order, letting hits reuse SQL without re-rendering.
+- **Runtime engine is the reflection/Expression.Compile fallback** (trim analyzer disabled on
+  `VeloORM.Runtime`); `[RequiresUnreferencedCode]` on `VeloDbContext`/`VeloModel.Build` warns
+  consumers. The trim/AOT-safe path is the source generator (Phase 5).
 
 ## Phase checklist
 
@@ -114,7 +124,7 @@ Execution order. After each phase: build, run tests, tick the box, write a brief
 - [x] **Phase 0** — Skeleton & infrastructure (solution, projects, Directory.Build.props, docker-compose, README/LICENSE/CLAUDE.md). Compiles; `docker compose up -d` works. ✅
 - [x] **Phase 1** — Core abstractions (IDbContext, DbSet<T>, metadata model, ISqlDialect, query model AST, IMaterializer). Unit tests pass (19 tests). ✅
 - [x] **Phase 2** — Postgres dialect + manual materializer (Npgsql, PostgresDialect, type mapping). Integration round-trip test passes (3 tests). ✅
-- [ ] **Phase 3** — Runtime engine ⭐ (IQueryable provider, expression→SQL, bound params, shape-keyed cache). Integration tests pass (correctness + warm cache).
+- [x] **Phase 3** — Runtime engine ⭐ (IQueryable provider, expression→SQL, bound params, shape-keyed cache). Integration tests pass (15 incl. warm-cache no-recompile). ✅ *Single-table operators (Where/Select/OrderBy/ThenBy/Take/Skip/First/Single/Any/Count + string methods, IN, null checks) are implemented; Join/GroupBy currently throw `NotSupportedException` (fallback-safe, no wrong SQL) — to be completed.*
 - [ ] **Phase 4** — Raw SQL escape hatch + `[InterpolatedStringHandler]`.
 - [ ] **Phase 5** — Source generator: interceptor layer.
 - [ ] **Phase 6** — Fragment generation (bool-gated optional filters).

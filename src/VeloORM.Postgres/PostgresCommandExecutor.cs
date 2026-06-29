@@ -12,7 +12,7 @@ namespace VeloORM.Postgres;
 /// <c>NpgsqlDbType</c> so the server never has to guess. Connections are opened from the factory
 /// (Npgsql-pooled) and disposed per call.
 /// </summary>
-public sealed class PostgresCommandExecutor
+public sealed class PostgresCommandExecutor : ICommandExecutor
 {
     private readonly IConnectionFactory _connectionFactory;
 
@@ -33,6 +33,38 @@ public sealed class PostgresCommandExecutor
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
             results.Add(materializer.Read(reader));
         return results;
+    }
+
+    public List<T> Query<T>(SqlStatement statement, IMaterializer<T> materializer)
+    {
+        using var connection = (NpgsqlConnection)_connectionFactory.CreateConnection();
+        connection.Open();
+        using var command = CreateCommand(connection, statement);
+        using var reader = command.ExecuteReader();
+
+        var results = new List<T>();
+        while (reader.Read())
+            results.Add(materializer.Read(reader));
+        return results;
+    }
+
+    public int Execute(SqlStatement statement)
+    {
+        using var connection = (NpgsqlConnection)_connectionFactory.CreateConnection();
+        connection.Open();
+        using var command = CreateCommand(connection, statement);
+        return command.ExecuteNonQuery();
+    }
+
+    public TScalar? ExecuteScalar<TScalar>(SqlStatement statement)
+    {
+        using var connection = (NpgsqlConnection)_connectionFactory.CreateConnection();
+        connection.Open();
+        using var command = CreateCommand(connection, statement);
+        var result = command.ExecuteScalar();
+        if (result is null || result is DBNull)
+            return default;
+        return (TScalar)Convert.ChangeType(result, typeof(TScalar), System.Globalization.CultureInfo.InvariantCulture);
     }
 
     public async Task<int> ExecuteAsync(SqlStatement statement, CancellationToken cancellationToken = default)

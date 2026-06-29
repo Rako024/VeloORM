@@ -30,6 +30,14 @@ public sealed class SqlParameter(object? value, Type clrType) : SqlExpression
 {
     public object? Value { get; } = value;
     public Type ClrType { get; } = clrType;
+
+    /// <summary>
+    /// Pre-assigned zero-based placeholder ordinal. When &gt;= 0 the builder renders this exact
+    /// ordinal (and does not collect the value itself); the caller supplies the binding list in
+    /// ordinal order. When -1 (the default) the builder self-assigns ordinals in render order and
+    /// collects the bindings. The runtime engine uses the former so cache hits skip SQL rendering.
+    /// </summary>
+    public int Ordinal { get; set; } = -1;
 }
 
 /// <summary>A constant rendered literally into SQL. Restricted to dialect-safe tokens

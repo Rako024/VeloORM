@@ -6,6 +6,11 @@
     <AssemblyName>VeloORM.Runtime</AssemblyName>
     <PackageId>VeloORM.Runtime</PackageId>
     <Description>VeloORM runtime engine: the IQueryable provider, expression-tree-to-SQL translator, and the shape-keyed query cache. This is the default fallback execution path.</Description>
+    <!-- The runtime engine is the reflection / Expression.Compile fallback path by design; the
+         trim-safe path is the source-generated code. We surface this to consumers via
+         [RequiresUnreferencedCode] on the public entry points rather than per-line IL warnings. -->
+    <IsTrimmable>false</IsTrimmable>
+    <EnableTrimAnalyzer>false</EnableTrimAnalyzer>
   </PropertyGroup>
 
   <ItemGroup>

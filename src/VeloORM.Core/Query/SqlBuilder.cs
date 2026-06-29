@@ -162,8 +162,16 @@ public sealed class SqlBuilder
                 break;
 
             case SqlParameter p:
-                _parameters.Add(new SqlParameterBinding(p.Value, p.ClrType));
-                _sql.Append(_dialect.RenderParameter(_parameters.Count - 1));
+                if (p.Ordinal >= 0)
+                {
+                    // Pre-assigned ordinal: the caller owns the binding list; render only.
+                    _sql.Append(_dialect.RenderParameter(p.Ordinal));
+                }
+                else
+                {
+                    _parameters.Add(new SqlParameterBinding(p.Value, p.ClrType));
+                    _sql.Append(_dialect.RenderParameter(_parameters.Count - 1));
+                }
                 break;
 
             case SqlLiteral lit:
