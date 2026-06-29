@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "PowerShell(docker compose -f \"C:\\\\ProgramData\\\\VeloORM\\\\docker\\\\docker-compose.yml\" ps --format \"table {{.Name}}\\\\t{{.Status}}\\\\t{{.Ports}}\")"
+      "PowerShell(docker compose -f \"C:\\\\ProgramData\\\\VeloORM\\\\docker\\\\docker-compose.yml\" ps --format \"table {{.Name}}\\\\t{{.Status}}\\\\t{{.Ports}}\")",
+      "PowerShell(Set-Location \"C:\\\\ProgramData\\\\VeloORM\"; \\(Get-Content tests\\\\..\\\\src\\\\VeloORM.Runtime\\\\RawSql\\\\VeloDbContext.RawSql.cs | Select-String -Pattern \"MaterializerFor<T>\\\\\\(\\\\\\)\" | Measure-Object\\).Count)"
     ]
   }
 }

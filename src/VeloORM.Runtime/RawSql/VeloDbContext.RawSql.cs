@@ -18,18 +18,18 @@ public partial class VeloDbContext
 {
     [RequiresUnreferencedCode("Builds a materializer via reflection for the raw-SQL result type.")]
     public List<T> Query<T>([InterpolatedStringHandlerArgument("")] VeloInterpolatedSql sql) =>
-        Executor.Query(sql.ToStatement(), MaterializerFor<T>());
+        Executor.Query(sql.ToStatement(), RawMaterializerFor<T>());
 
     [RequiresUnreferencedCode("Builds a materializer via reflection for the raw-SQL result type.")]
     public Task<List<T>> QueryAsync<T>(
         [InterpolatedStringHandlerArgument("")] VeloInterpolatedSql sql,
         CancellationToken cancellationToken = default) =>
-        Executor.QueryAsync(sql.ToStatement(), MaterializerFor<T>(), cancellationToken);
+        Executor.QueryAsync(sql.ToStatement(), RawMaterializerFor<T>(), cancellationToken);
 
     [RequiresUnreferencedCode("Builds a materializer via reflection for the raw-SQL result type.")]
     public T? QuerySingleOrDefault<T>([InterpolatedStringHandlerArgument("")] VeloInterpolatedSql sql)
     {
-        var rows = Executor.Query(sql.ToStatement(), MaterializerFor<T>());
+        var rows = Executor.Query(sql.ToStatement(), RawMaterializerFor<T>());
         if (rows.Count > 1)
             throw new InvalidOperationException("Sequence contains more than one element.");
         return rows.Count == 0 ? default : rows[0];
@@ -47,7 +47,7 @@ public partial class VeloDbContext
         Executor.ExecuteScalar<TScalar>(sql.ToStatement());
 
     [RequiresUnreferencedCode("Builds a materializer via reflection for the raw-SQL result type.")]
-    private IMaterializer<T> MaterializerFor<T>()
+    internal IMaterializer<T> RawMaterializerFor<T>()
     {
         // Known entity type -> map columns by name; otherwise read a single scalar from column 0.
         if (Model.FindEntity(typeof(T)) is { } entity)
