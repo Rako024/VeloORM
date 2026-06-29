@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+    <RootNamespace>VeloORM.Postgres</RootNamespace>
+    <AssemblyName>VeloORM.Postgres</AssemblyName>
+    <PackageId>VeloORM.Postgres</PackageId>
+    <Description>VeloORM PostgreSQL provider: the Npgsql-backed ISqlDialect implementation, .NET-to-Postgres type mapping, and COPY-based bulk insert.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Npgsql" Version="8.0.5" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\VeloORM.Core\VeloORM.Core.csproj" />
+    <ProjectReference Include="..\VeloORM.Runtime\VeloORM.Runtime.csproj" />
+  </ItemGroup>
+
+</Project>

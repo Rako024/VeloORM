@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+    <RootNamespace>VeloORM</RootNamespace>
+    <AssemblyName>VeloORM.Core</AssemblyName>
+    <PackageId>VeloORM.Core</PackageId>
+    <Description>VeloORM core abstractions: IDbContext, ISqlDialect, the entity metadata model, the internal query model (AST), and materializer interfaces.</Description>
+  </PropertyGroup>
+
+</Project>

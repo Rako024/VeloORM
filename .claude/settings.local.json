@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(docker compose -f \"C:\\\\ProgramData\\\\VeloORM\\\\docker\\\\docker-compose.yml\" ps --format \"table {{.Name}}\\\\t{{.Status}}\\\\t{{.Ports}}\")"
+    ]
+  }
+}

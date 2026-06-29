@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>VeloORM.Cli</RootNamespace>
+    <AssemblyName>velo</AssemblyName>
+    <PackageId>VeloORM.Cli</PackageId>
+    <Description>VeloORM command-line tool: add-migration, update-database, revert, scaffold, list-migrations.</Description>
+    <!-- dotnet tool packaging (exercised in Phase 10). -->
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>velo</ToolCommandName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\VeloORM.Core\VeloORM.Core.csproj" />
+    <ProjectReference Include="..\VeloORM.Postgres\VeloORM.Postgres.csproj" />
+    <ProjectReference Include="..\VeloORM.Migrations\VeloORM.Migrations.csproj" />
+    <ProjectReference Include="..\VeloORM.Scaffold\VeloORM.Scaffold.csproj" />
+  </ItemGroup>
+
+</Project>

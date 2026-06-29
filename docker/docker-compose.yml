@@ -1,0 +1,35 @@
+# VeloORM local development stack.
+#   docker compose -f docker/docker-compose.yml up -d
+#
+# Postgres 16 is the primary target database. Adminer is an optional
+# lightweight web UI for poking at the schema while debugging.
+services:
+  postgres:
+    image: postgres:16
+    container_name: veloorm-postgres
+    environment:
+      POSTGRES_USER: velo
+      POSTGRES_PASSWORD: velo_dev_password
+      POSTGRES_DB: veloorm
+    ports:
+      - "5432:5432"
+    volumes:
+      - veloorm-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U velo -d veloorm"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  adminer:
+    image: adminer:4
+    container_name: veloorm-adminer
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  veloorm-pgdata:

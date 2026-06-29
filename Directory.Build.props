@@ -1,0 +1,55 @@
+<Project>
+
+  <!-- ===================================================================
+       VeloORM — shared build configuration for every project in the repo.
+       Project-specific TFMs / package flags live in each .csproj.
+       =================================================================== -->
+
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <!-- AOT / trimming friendliness is a project goal; surface issues early. -->
+    <IsTrimmable>true</IsTrimmable>
+  </PropertyGroup>
+
+  <!-- Deterministic / reproducible build (source-link friendly). -->
+  <PropertyGroup>
+    <Deterministic>true</Deterministic>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+
+  <!-- C# Interceptors opt-in. The generator emits interceptors into the
+       VeloORM.Generated namespace; consuming/runtime-bearing projects must
+       list it here. Wired into the real pipeline in Phase 5. -->
+  <PropertyGroup>
+    <InterceptorsNamespaces>$(InterceptorsNamespaces);VeloORM.Generated</InterceptorsNamespaces>
+  </PropertyGroup>
+
+  <!-- ===================== Shared NuGet metadata =====================
+       Per-package id/description/tags are set in each .csproj; these are
+       the org-wide defaults. (Real packaging hardened in Phase 13.) -->
+  <PropertyGroup>
+    <Authors>VeloORM Contributors</Authors>
+    <Company>VeloORM</Company>
+    <Product>VeloORM</Product>
+    <Copyright>Copyright (c) VeloORM Contributors</Copyright>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/veloorm/veloorm</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/veloorm/veloorm</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>orm;postgresql;postgres;dapper;sql;source-generator;linq;micro-orm</PackageTags>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <VersionPrefix>0.1.0</VersionPrefix>
+    <!-- Packages are produced explicitly in Phase 13; off by default. -->
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+</Project>

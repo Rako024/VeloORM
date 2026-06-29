@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+    <RootNamespace>VeloORM.Runtime</RootNamespace>
+    <AssemblyName>VeloORM.Runtime</AssemblyName>
+    <PackageId>VeloORM.Runtime</PackageId>
+    <Description>VeloORM runtime engine: the IQueryable provider, expression-tree-to-SQL translator, and the shape-keyed query cache. This is the default fallback execution path.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\VeloORM.Core\VeloORM.Core.csproj" />
+  </ItemGroup>
+
+</Project>

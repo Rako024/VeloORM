@@ -1,0 +1,28 @@
+# Build output
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+artifacts/
+*.user
+*.suo
+
+# Rider / VS / VS Code
+.vs/
+.idea/
+*.userprefs
+
+# NuGet
+*.nupkg
+*.snupkg
+.packages/
+local-feed/
+
+# Test / coverage
+[Tt]est[Rr]esults/
+*.coverage
+coverage*.json
+coverage*.xml
+
+# OS
+.DS_Store
+Thumbs.db

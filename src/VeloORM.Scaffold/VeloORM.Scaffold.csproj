@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+    <RootNamespace>VeloORM.Scaffold</RootNamespace>
+    <AssemblyName>VeloORM.Scaffold</AssemblyName>
+    <PackageId>VeloORM.Scaffold</PackageId>
+    <Description>VeloORM database-first scaffolding: reverse-engineers entity classes, configuration, and a DbContext from an existing PostgreSQL database.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\VeloORM.Core\VeloORM.Core.csproj" />
+    <ProjectReference Include="..\VeloORM.Postgres\VeloORM.Postgres.csproj" />
+  </ItemGroup>
+
+</Project>

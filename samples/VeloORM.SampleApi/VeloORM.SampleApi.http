@@ -1,0 +1,6 @@
+@VeloORM.SampleApi_HostAddress = http://localhost:5120
+
+GET {{VeloORM.SampleApi_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

@@ -1,0 +1,18 @@
+<Solution>
+  <Folder Name="/samples/">
+    <Project Path="samples/VeloORM.SampleApi/VeloORM.SampleApi.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/VeloORM.Cli/VeloORM.Cli.csproj" />
+    <Project Path="src/VeloORM.Core/VeloORM.Core.csproj" />
+    <Project Path="src/VeloORM.Generator/VeloORM.Generator.csproj" />
+    <Project Path="src/VeloORM.Migrations/VeloORM.Migrations.csproj" />
+    <Project Path="src/VeloORM.Postgres/VeloORM.Postgres.csproj" />
+    <Project Path="src/VeloORM.Runtime/VeloORM.Runtime.csproj" />
+    <Project Path="src/VeloORM.Scaffold/VeloORM.Scaffold.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/VeloORM.Tests.Integration/VeloORM.Tests.Integration.csproj" />
+    <Project Path="tests/VeloORM.Tests.Unit/VeloORM.Tests.Unit.csproj" />
+  </Folder>
+</Solution>
