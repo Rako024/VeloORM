@@ -113,7 +113,7 @@ Execution order. After each phase: build, run tests, tick the box, write a brief
 
 - [x] **Phase 0** — Skeleton & infrastructure (solution, projects, Directory.Build.props, docker-compose, README/LICENSE/CLAUDE.md). Compiles; `docker compose up -d` works. ✅
 - [x] **Phase 1** — Core abstractions (IDbContext, DbSet<T>, metadata model, ISqlDialect, query model AST, IMaterializer). Unit tests pass (19 tests). ✅
-- [ ] **Phase 2** — Postgres dialect + manual materializer (Npgsql, PostgresDialect, type mapping). Integration round-trip test passes.
+- [x] **Phase 2** — Postgres dialect + manual materializer (Npgsql, PostgresDialect, type mapping). Integration round-trip test passes (3 tests). ✅
 - [ ] **Phase 3** — Runtime engine ⭐ (IQueryable provider, expression→SQL, bound params, shape-keyed cache). Integration tests pass (correctness + warm cache).
 - [ ] **Phase 4** — Raw SQL escape hatch + `[InterpolatedStringHandler]`.
 - [ ] **Phase 5** — Source generator: interceptor layer.
