@@ -5,7 +5,7 @@ using System.Reflection;
 using VeloORM.Query;
 using VeloORM.Runtime.Materialization;
 
-namespace VeloORM.Runtime.Query;
+namespace VeloORM.Runtime.Internal;
 
 /// <summary>
 /// Orchestrates the runtime execution path: translate the expression, look up (or compile) the SQL +

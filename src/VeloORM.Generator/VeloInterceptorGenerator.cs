@@ -21,6 +21,22 @@ public sealed class VeloInterceptorGenerator : IIncrementalGenerator
     private static readonly HashSet<string> Terminals =
         new() { "ToList", "First", "FirstOrDefault", "Single", "SingleOrDefault", "Count", "Any" };
 
+    internal static readonly DiagnosticDescriptor RuntimeFallback = new(
+        id: "VELO001",
+        title: "Query runs via runtime translation",
+        messageFormat: "VeloORM query is not statically interceptable and will be translated at runtime",
+        category: "VeloORM.Performance",
+        defaultSeverity: DiagnosticSeverity.Info,
+        isEnabledByDefault: true);
+
+    internal static readonly DiagnosticDescriptor NonStaticCompiledQuery = new(
+        id: "VELO002",
+        title: "Query.Compile requires a static query",
+        messageFormat: "Query.Compile requires a lambda whose body is a query rooted at the context Set<T>()",
+        category: "VeloORM.Usage",
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
         var candidates = context.SyntaxProvider.CreateSyntaxProvider(
@@ -30,6 +46,92 @@ public sealed class VeloInterceptorGenerator : IIncrementalGenerator
             .Select(static (info, _) => info!);
 
         context.RegisterSourceOutput(candidates.Collect(), static (spc, infos) => Emit(spc, infos));
+
+        // VELO001: terminal query sites rooted at Set<T>() that we do not intercept.
+        var fallbacks = context.SyntaxProvider.CreateSyntaxProvider(
+            predicate: static (node, _) => IsTerminalCandidate(node),
+            transform: static (ctx, ct) => DetectFallback(ctx, ct))
+            .Where(static loc => loc is not null)
+            .Select(static (loc, _) => loc!);
+        context.RegisterSourceOutput(fallbacks, static (spc, loc) => spc.ReportDiagnostic(Diagnostic.Create(RuntimeFallback, loc)));
+
+        // VELO002: Query.Compile calls whose argument is not a recognizable static query.
+        var badCompiles = context.SyntaxProvider.CreateSyntaxProvider(
+            predicate: static (node, _) => IsCompileCandidate(node),
+            transform: static (ctx, ct) => DetectBadCompile(ctx, ct))
+            .Where(static loc => loc is not null)
+            .Select(static (loc, _) => loc!);
+        context.RegisterSourceOutput(badCompiles, static (spc, loc) => spc.ReportDiagnostic(Diagnostic.Create(NonStaticCompiledQuery, loc)));
+    }
+
+    private static readonly HashSet<string> TerminalNames = new()
+    {
+        "ToList", "ToArray", "First", "FirstOrDefault", "Single", "SingleOrDefault",
+        "Count", "LongCount", "Any", "All", "Sum", "Min", "Max", "Average",
+    };
+
+    private static bool IsTerminalCandidate(SyntaxNode node) =>
+        node is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax member }
+        && TerminalNames.Contains(member.Name.Identifier.Text);
+
+    private static Location? DetectFallback(GeneratorSyntaxContext ctx, System.Threading.CancellationToken ct)
+    {
+        var invocation = (InvocationExpressionSyntax)ctx.Node;
+        var member = (MemberAccessExpressionSyntax)invocation.Expression;
+
+        if (!RootsAtVeloSet(member.Expression, ctx.SemanticModel, ct))
+            return null;
+
+        // A directly-interceptable site (Set<T>().<supported 0-arg terminal>()) is optimized — no warning.
+        bool directInterceptable =
+            invocation.ArgumentList.Arguments.Count == 0
+            && Terminals.Contains(member.Name.Identifier.Text)
+            && member.Expression is InvocationExpressionSyntax setInv
+            && ctx.SemanticModel.GetSymbolInfo(setInv, ct).Symbol is IMethodSymbol { Name: "Set" } s
+            && IsVeloContext(s.ContainingType);
+
+        return directInterceptable ? null : invocation.GetLocation();
+    }
+
+    private static bool RootsAtVeloSet(ExpressionSyntax? expression, SemanticModel model, System.Threading.CancellationToken ct)
+    {
+        var current = expression;
+        while (current is InvocationExpressionSyntax inv)
+        {
+            if (model.GetSymbolInfo(inv, ct).Symbol is IMethodSymbol { Name: "Set" } s && IsVeloContext(s.ContainingType))
+                return true;
+            current = inv.Expression is MemberAccessExpressionSyntax ma ? ma.Expression : null;
+        }
+        return false;
+    }
+
+    private static bool IsCompileCandidate(SyntaxNode node) =>
+        node is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax { Name.Identifier.Text: "Compile" } };
+
+    private static Location? DetectBadCompile(GeneratorSyntaxContext ctx, System.Threading.CancellationToken ct)
+    {
+        var invocation = (InvocationExpressionSyntax)ctx.Node;
+        if (ctx.SemanticModel.GetSymbolInfo(invocation, ct).Symbol is not IMethodSymbol method)
+            return null;
+        if (method.ContainingType?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) != "global::VeloORM.Runtime.Query")
+            return null;
+
+        // The first argument must be a lambda whose body is a query rooted at the db parameter's Set<T>().
+        var arg = invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression;
+        if (arg is not LambdaExpressionSyntax lambda)
+            return invocation.GetLocation();
+
+        var body = lambda.Body as ExpressionSyntax;
+        if (body is null || !RootsAtVeloSet(StripTerminal(body), ctx.SemanticModel, ct))
+            return invocation.GetLocation();
+
+        return null;
+    }
+
+    private static ExpressionSyntax StripTerminal(ExpressionSyntax body)
+    {
+        // For "db.Set<T>()...ToList()" the body's outermost is the terminal invocation; its chain roots at Set.
+        return body is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax ma } ? ma.Expression : body;
     }
 
     private static bool IsCandidate(SyntaxNode node) =>

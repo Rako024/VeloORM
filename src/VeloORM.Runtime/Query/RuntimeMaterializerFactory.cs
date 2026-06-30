@@ -3,7 +3,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Linq.Expressions;
 using System.Reflection;
 
-namespace VeloORM.Runtime.Query;
+namespace VeloORM.Runtime.Internal;
 
 /// <summary>
 /// Builds a compiled <c>Func&lt;DbDataReader, TElement&gt;</c> (boxed as a <see cref="Delegate"/>) for a

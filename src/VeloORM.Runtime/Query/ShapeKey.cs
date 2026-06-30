@@ -1,7 +1,7 @@
 using System.Text;
 using VeloORM.Query;
 
-namespace VeloORM.Runtime.Query;
+namespace VeloORM.Runtime.Internal;
 
 /// <summary>
 /// Computes a cache key from a query's <em>structure</em>, deliberately excluding parameter values

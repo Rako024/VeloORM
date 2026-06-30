@@ -1,7 +1,7 @@
 using System.Reflection;
 using VeloORM.Metadata;
 
-namespace VeloORM.Runtime.Query;
+namespace VeloORM.Runtime.Internal;
 
 internal enum ProjectionKind
 {

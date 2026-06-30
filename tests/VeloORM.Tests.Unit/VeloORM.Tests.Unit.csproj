@@ -11,11 +11,13 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\VeloORM.Core\VeloORM.Core.csproj" />
     <ProjectReference Include="..\..\src\VeloORM.Runtime\VeloORM.Runtime.csproj" />
+    <ProjectReference Include="..\..\src\VeloORM.Generator\VeloORM.Generator.csproj" />
   </ItemGroup>
 
   <ItemGroup>

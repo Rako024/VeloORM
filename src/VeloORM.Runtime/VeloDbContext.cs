@@ -1,7 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using VeloORM.Data;
 using VeloORM.Metadata;
-using VeloORM.Runtime.Query;
+using VeloORM.Runtime.Internal;
 using VeloORM.Sql;
 
 namespace VeloORM.Runtime;

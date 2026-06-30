@@ -1,7 +1,7 @@
 using System.Data.Common;
 using VeloORM.Query;
 using VeloORM.Runtime.Materialization;
-using VeloORM.Runtime.Query;
+using VeloORM.Runtime.Internal;
 
 namespace VeloORM.Runtime;
 

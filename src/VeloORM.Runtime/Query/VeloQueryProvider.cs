@@ -1,6 +1,6 @@
 using System.Linq.Expressions;
 
-namespace VeloORM.Runtime.Query;
+namespace VeloORM.Runtime.Internal;
 
 /// <summary>
 /// The <see cref="IQueryProvider"/> for VeloORM's runtime engine. <see cref="CreateQuery"/> simply

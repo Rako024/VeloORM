@@ -1,7 +1,7 @@
 using System.Collections;
 using System.Linq.Expressions;
 
-namespace VeloORM.Runtime.Query;
+namespace VeloORM.Runtime.Internal;
 
 /// <summary>
 /// The <c>IQueryable&lt;T&gt;</c> (and <c>IOrderedQueryable&lt;T&gt;</c>) implementation returned by

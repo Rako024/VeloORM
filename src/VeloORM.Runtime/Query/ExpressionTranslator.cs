@@ -3,7 +3,7 @@ using System.Reflection;
 using VeloORM.Metadata;
 using VeloORM.Query;
 
-namespace VeloORM.Runtime.Query;
+namespace VeloORM.Runtime.Internal;
 
 /// <summary>
 /// Translates a single-table LINQ expression tree into a <see cref="QueryModel"/>, a list of bound
