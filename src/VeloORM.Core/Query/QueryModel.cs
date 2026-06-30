@@ -13,8 +13,16 @@ public enum QueryTerminal
     Any,
     /// <summary><c>SELECT count(*)</c>.</summary>
     Count,
-    /// <summary>A scalar aggregate other than count (sum/min/max/avg) defined by the projection.</summary>
+    /// <summary>A scalar projection materialized per row (<c>Select(x =&gt; x.Prop)</c>).</summary>
     Scalar,
+    /// <summary><c>SELECT sum(expr)</c> — a single scalar value.</summary>
+    Sum,
+    /// <summary><c>SELECT avg(expr)</c> — a single scalar value.</summary>
+    Average,
+    /// <summary><c>SELECT min(expr)</c> — a single scalar value.</summary>
+    Min,
+    /// <summary><c>SELECT max(expr)</c> — a single scalar value.</summary>
+    Max,
 }
 
 public enum JoinKind { Inner, Left }

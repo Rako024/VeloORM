@@ -33,6 +33,12 @@ public sealed class SqlBuilder
             case QueryTerminal.Any:
                 BuildAny(query);
                 break;
+            case QueryTerminal.Sum:
+            case QueryTerminal.Average:
+            case QueryTerminal.Min:
+            case QueryTerminal.Max:
+                BuildAggregate(query);
+                break;
             default:
                 BuildSelect(query);
                 break;
@@ -81,6 +87,20 @@ public sealed class SqlBuilder
         AppendFromAndJoins(q);
         AppendWhere(q.Where);
         _sql.Append(')');
+    }
+
+    private void BuildAggregate(QueryModel q)
+    {
+        // A single scalar aggregate: SELECT sum(expr) FROM ... WHERE ...
+        // No ORDER BY / paging (a single value is returned); the aggregate lives in Select[0].
+        if (q.Select.Count != 1)
+            throw new InvalidOperationException("An aggregate query must have exactly one select item.");
+        _sql.Append("SELECT ");
+        AppendExpression(q.Select[0].Expression);
+        AppendFromAndJoins(q);
+        AppendWhere(q.Where);
+        AppendGroupBy(q);
+        AppendHaving(q.Having);
     }
 
     private void AppendFromAndJoins(QueryModel q)

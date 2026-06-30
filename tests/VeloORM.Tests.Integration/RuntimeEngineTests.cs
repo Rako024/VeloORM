@@ -103,6 +103,31 @@ public class RuntimeEngineTests : IAsyncLifetime
     }
 
     [Fact]
+    public void Aggregate_Terminals_Sum_Min_Max_Average()
+    {
+        // prices: Apple 1.50, Banana 0.75, Cherry 3.00, Date 5.25
+        Assert.Equal(10.50m, _db.Set<Product>().Sum(p => p.Price));
+        Assert.Equal(0.75m, _db.Set<Product>().Min(p => p.Price));
+        Assert.Equal(5.25m, _db.Set<Product>().Max(p => p.Price));
+        Assert.Equal(2.625m, _db.Set<Product>().Average(p => p.Price));
+
+        // With a predicate (in-stock: Apple, Banana, Date)
+        Assert.Equal(7.50m, _db.Set<Product>().Where(p => p.InStock).Sum(p => p.Price));
+        Assert.Equal(0.75m, _db.Set<Product>().Where(p => p.InStock).Min(p => p.Price));
+    }
+
+    [Fact]
+    public void Aggregate_Empty_Sequence_Matches_Linq_Semantics()
+    {
+        // Sum over no rows is 0 (not NULL/throw).
+        Assert.Equal(0m, _db.Set<Product>().Where(p => p.Price > 1000m).Sum(p => p.Price));
+
+        // Min/Max over no rows with a non-nullable result throw (as LINQ-to-Objects does).
+        Assert.Throws<InvalidOperationException>(
+            () => _db.Set<Product>().Where(p => p.Price > 1000m).Min(p => p.Price));
+    }
+
+    [Fact]
     public void First_Single_Terminals()
     {
         var first = _db.Set<Product>().OrderBy(p => p.Price).First();

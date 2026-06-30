@@ -38,8 +38,30 @@ internal sealed class QueryEngine
         {
             QueryTerminal.Count => ConvertCount(_context.Executor.ExecuteScalar<long>(statement), resultType),
             QueryTerminal.Any => _context.Executor.ExecuteScalar<bool>(statement),
+            QueryTerminal.Sum or QueryTerminal.Average or QueryTerminal.Min or QueryTerminal.Max
+                => ExecuteAggregate(statement, resultType, compiled.Terminal),
             _ => InvokeRun(compiled, statement),
         };
+    }
+
+    /// <summary>Executes a scalar aggregate and coerces the result to the LINQ-declared type, matching
+    /// LINQ's empty-sequence semantics: <c>Sum</c> over no rows is 0; <c>Min/Max/Average</c> over no
+    /// rows return null when the result type is nullable, otherwise throw.</summary>
+    private object? ExecuteAggregate(SqlStatement statement, Type resultType, QueryTerminal terminal)
+    {
+        var raw = _context.Executor.ExecuteScalar<object>(statement);
+        var underlying = Nullable.GetUnderlyingType(resultType);
+        bool nullable = underlying is not null || !resultType.IsValueType;
+        var target = underlying ?? resultType;
+
+        if (raw is null)
+        {
+            if (nullable) return null;
+            if (terminal == QueryTerminal.Sum) return Activator.CreateInstance(target); // 0 for numerics
+            throw new InvalidOperationException("Sequence contains no elements.");
+        }
+
+        return Convert.ChangeType(raw, target, System.Globalization.CultureInfo.InvariantCulture);
     }
 
     private object? InvokeRun(CompiledQuery compiled, SqlStatement statement)
@@ -71,7 +93,8 @@ internal sealed class QueryEngine
             Terminal = translation.Terminal,
         };
 
-        if (translation.Terminal is not (QueryTerminal.Count or QueryTerminal.Any))
+        if (translation.Terminal is QueryTerminal.List or QueryTerminal.First or QueryTerminal.FirstOrDefault
+            or QueryTerminal.Single or QueryTerminal.SingleOrDefault or QueryTerminal.Scalar)
         {
             compiled.Materializer = RuntimeMaterializerFactory.Build(translation.Projection);
             compiled.ResultElementType = translation.Projection.ResultType;

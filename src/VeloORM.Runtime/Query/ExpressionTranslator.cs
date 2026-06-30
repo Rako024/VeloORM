@@ -154,6 +154,18 @@ internal sealed class ExpressionTranslator
                 ApplyOptionalPredicate(call);
                 _query.Terminal = QueryTerminal.Count;
                 break;
+            case "Sum":
+                ApplyAggregate(call, "sum", QueryTerminal.Sum);
+                break;
+            case "Average":
+                ApplyAggregate(call, "avg", QueryTerminal.Average);
+                break;
+            case "Min":
+                ApplyAggregate(call, "min", QueryTerminal.Min);
+                break;
+            case "Max":
+                ApplyAggregate(call, "max", QueryTerminal.Max);
+                break;
             default:
                 throw new NotSupportedException(
                     $"LINQ operator '{call.Method.Name}' is not supported by the runtime engine yet.");
@@ -164,6 +176,44 @@ internal sealed class ExpressionTranslator
     {
         if (call.Arguments.Count == 2)
             AndWhere(TranslateRootLambda(GetLambda(call.Arguments[1])));
+    }
+
+    /// <summary>Turns a terminal aggregate (<c>Sum/Average/Min/Max</c>) into a single
+    /// <c>SELECT &lt;fn&gt;(expr)</c>. The expression comes from the selector lambda
+    /// (<c>Sum(x =&gt; x.Price)</c>) or, absent one, from a prior scalar projection
+    /// (<c>Select(x =&gt; x.Price).Sum()</c>).</summary>
+    private void ApplyAggregate(MethodCallExpression call, string fn, QueryTerminal terminal)
+    {
+        SqlExpression arg;
+        if (call.Arguments.Count == 2)
+        {
+            arg = TranslateRootLambda(GetLambda(call.Arguments[1]));
+        }
+        else if (_query.Select.Count == 1)
+        {
+            arg = _query.Select[0].Expression; // Select(x => x.Col).Sum()
+        }
+        else
+        {
+            throw new NotSupportedException(
+                $"'{call.Method.Name}' requires a selector or a preceding scalar projection.");
+        }
+
+        _query.OrderBy.Clear();
+        _query.Limit = null;
+        _query.Offset = null;
+        _query.Select.Clear();
+        _query.Select.Add(new SelectItem(new SqlFunction(fn, new[] { arg }, isAggregate: true), "c0"));
+        _query.Terminal = terminal;
+
+        // The result is read via ExecuteScalar; the projection is only needed so the shape key and
+        // the (unused) materializer branch see a valid plan.
+        _projection = new ProjectionPlan
+        {
+            Kind = ProjectionKind.Scalar,
+            ResultType = call.Type,
+            ScalarAlias = "c0",
+        };
     }
 
     private void AddOrdering(MethodCallExpression call, bool descending) =>

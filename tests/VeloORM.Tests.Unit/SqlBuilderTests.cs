@@ -119,6 +119,41 @@ public class SqlBuilderTests
     }
 
     [Fact]
+    public void Sum_Terminal_Renders_Aggregate_Without_OrderBy_Or_Paging()
+    {
+        var q = new QueryModel(UserModel.Schema, UserModel.TableName, "u");
+        q.Select.Add(new SelectItem(
+            new SqlFunction("sum", new SqlExpression[] { Col("login_count", typeof(int)) }, isAggregate: true), "c0"));
+        q.Where = new SqlBinary(Col("login_count", typeof(int)), SqlBinaryOperator.GreaterThan, new SqlParameter(0, typeof(int)));
+        q.OrderBy.Add(new Ordering(Col("login_count", typeof(int)), descending: true)); // must be ignored
+        q.Limit = 5; // must be ignored
+        q.Terminal = QueryTerminal.Sum;
+
+        var stmt = SqlBuilder.Build(q, Dialect);
+
+        Assert.StartsWith("SELECT sum(\"u\".\"login_count\") FROM \"users\" AS \"u\"", stmt.Sql);
+        Assert.Contains("WHERE (\"u\".\"login_count\" > $1)", stmt.Sql);
+        Assert.DoesNotContain("ORDER BY", stmt.Sql);
+        Assert.DoesNotContain("LIMIT", stmt.Sql);
+    }
+
+    [Theory]
+    [InlineData(QueryTerminal.Min, "min")]
+    [InlineData(QueryTerminal.Max, "max")]
+    [InlineData(QueryTerminal.Average, "avg")]
+    public void Aggregate_Terminals_Render_Their_Function(QueryTerminal terminal, string fn)
+    {
+        var q = new QueryModel(UserModel.Schema, UserModel.TableName, "u");
+        q.Select.Add(new SelectItem(
+            new SqlFunction(fn, new SqlExpression[] { Col("login_count", typeof(int)) }, isAggregate: true), "c0"));
+        q.Terminal = terminal;
+
+        var stmt = SqlBuilder.Build(q, Dialect);
+
+        Assert.Equal($"SELECT {fn}(\"u\".\"login_count\") FROM \"users\" AS \"u\"", stmt.Sql);
+    }
+
+    [Fact]
     public void IsNull_Like_And_In_Render_Correctly()
     {
         var q = SelectAll();
