@@ -10,6 +10,9 @@
     <!-- dotnet tool packaging (exercised in Phase 10). -->
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>velo</ToolCommandName>
+    <!-- The CLI loads user assemblies via reflection by design; trimming does not apply. -->
+    <IsTrimmable>false</IsTrimmable>
+    <EnableTrimAnalyzer>false</EnableTrimAnalyzer>
   </PropertyGroup>
 
   <ItemGroup>

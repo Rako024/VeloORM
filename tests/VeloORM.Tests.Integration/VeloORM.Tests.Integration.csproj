@@ -20,6 +20,7 @@
     <ProjectReference Include="..\..\src\VeloORM.Postgres\VeloORM.Postgres.csproj" />
     <ProjectReference Include="..\..\src\VeloORM.Migrations\VeloORM.Migrations.csproj" />
     <ProjectReference Include="..\..\src\VeloORM.Scaffold\VeloORM.Scaffold.csproj" />
+    <ProjectReference Include="..\..\src\VeloORM.Cli\VeloORM.Cli.csproj" />
     <ProjectReference Include="..\..\src\VeloORM.Generator\VeloORM.Generator.csproj"
                       OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
   </ItemGroup>
