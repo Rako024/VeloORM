@@ -61,6 +61,30 @@ dotnet build VeloORM.slnx
 dotnet test
 ```
 
+## Sample API
+
+A minimal ASP.NET Core API in `samples/VeloORM.SampleApi` demonstrates all three layers
+and auto-applies the code-first schema on startup.
+
+```bash
+docker compose -f docker/docker-compose.yml up -d        # Postgres
+dotnet run --project samples/VeloORM.SampleApi           # API on http://localhost:5xxx
+```
+
+Endpoints (each maps to a layer):
+
+| Endpoint | Layer |
+|---|---|
+| `GET /products` | interceptor (compile-time SQL) |
+| `GET /products/{id}` | runtime engine (`Where`) |
+| `GET /products/search?name=&minPrice=&inStock=` | fragment (bool-gated filters) |
+| `GET /products/expensive?min=` | raw SQL (`db.Query`) |
+| `POST /products` | raw SQL insert (`RETURNING id`) |
+| `GET /health` | DB connectivity |
+
+The OpenAPI document is served at `/openapi/v1.json`. The connection string comes from
+`ConnectionStrings:Postgres`, the `VELO_CONNECTION` env var, or a localhost default.
+
 ## Benchmarks
 
 A BenchmarkDotNet harness comparing VeloORM, Dapper, and EF Core lives in

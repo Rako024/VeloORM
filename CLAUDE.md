@@ -133,7 +133,7 @@ Execution order. After each phase: build, run tests, tick the box, write a brief
 - [x] **Phase 9** — DB-first scaffolding. `ScaffoldTypeMapper` (store→CLR), `EntityScaffolder` reverse-engineers entity classes (snake_case→PascalCase, singularized class names, `[Table]`/`[Column]` only when differing from convention, `[Key]` on PK) + a context with `IQueryable<T>` properties from a live DB. 2 integration tests. ✅
 - [x] **Phase 10** — CLI (`velo`) as a dotnet tool. `CliCommands` (add-migration/update-database/revert/list-migrations/scaffold) over the Migrations/Scaffold engines; `Program` arg dispatcher, connection resolution (`--connection`/`VELO_CONNECTION`), assembly loading for add-migration. `PackAsTool`/`ToolCommandName=velo`. 2 integration tests (full migration lifecycle + scaffold). ✅
 - [x] **Phase 11** — Bulk (`COPY`) & performance. `PostgresBulkInserter` (binary COPY, skips identity columns) — 1000-row COPY integration test. `benchmarks/VeloORM.Benchmarks` (BenchmarkDotNet) compares VeloORM vs Dapper vs EF Core on select; compiles, run manually against a DB (`dotnet run -c Release`). ✅
-- [ ] **Phase 12** — SampleApi demonstrating all three layers.
+- [x] **Phase 12** — SampleApi demonstrating all three layers. Minimal ASP.NET Core API with code-first auto-migrate on startup; endpoints for interceptor (`GET /products`), runtime (`GET /products/{id}`), fragment (`GET /products/search`), raw SQL (`GET /products/expensive`, `POST /products`), and `GET /health`. Built-in OpenAPI at `/openapi/v1.json`. Verified end-to-end against compose Postgres (all endpoints return correct data). ✅
 - [ ] **Phase 13** — NuGet packaging.
 
 ### Recommended extras (do if practical, else mark "future")
