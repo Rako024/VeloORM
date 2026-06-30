@@ -29,6 +29,11 @@ public struct VeloInterpolatedSql
         _parameters = new List<SqlParameterBinding>(formattedCount);
     }
 
+    /// <summary>Overload so the same injection-safe handler works for raw SQL run on a transaction
+    /// (<c>tx.Execute($"...")</c>).</summary>
+    public VeloInterpolatedSql(int literalLength, int formattedCount, VeloTransaction transaction)
+        : this(literalLength, formattedCount, transaction.Context) { }
+
     /// <summary>Literal SQL fragments are appended verbatim.</summary>
     public void AppendLiteral(string value) => _sql.Append(value);
 

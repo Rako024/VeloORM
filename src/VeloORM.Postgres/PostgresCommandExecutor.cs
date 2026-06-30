@@ -9,8 +9,9 @@ namespace VeloORM.Postgres;
 /// <summary>
 /// Executes <see cref="SqlStatement"/>s against PostgreSQL. Bound parameters are added as Npgsql
 /// positional parameters (matching the dialect's <c>$N</c> placeholders); nulls carry an explicit
-/// <c>NpgsqlDbType</c> so the server never has to guess. Connections are opened from the factory
-/// (Npgsql-pooled) and disposed per call.
+/// <c>NpgsqlDbType</c> so the server never has to guess. Without a transaction a fresh pooled
+/// connection is opened and disposed per call; with a transaction the command runs on that
+/// transaction's connection, which is left open for the lifetime of the transaction.
 /// </summary>
 public sealed class PostgresCommandExecutor : ICommandExecutor
 {
@@ -19,79 +20,135 @@ public sealed class PostgresCommandExecutor : ICommandExecutor
     public PostgresCommandExecutor(IConnectionFactory connectionFactory) =>
         _connectionFactory = connectionFactory;
 
-    public async Task<List<T>> QueryAsync<T>(
-        SqlStatement statement,
-        IMaterializer<T> materializer,
-        CancellationToken cancellationToken = default)
+    // ---- sync ----------------------------------------------------------
+
+    public List<T> Query<T>(SqlStatement statement, IMaterializer<T> materializer) =>
+        Query(statement, materializer, null);
+
+    public List<T> Query<T>(SqlStatement statement, IMaterializer<T> materializer, DbTransaction? transaction)
     {
-        await using var connection = (NpgsqlConnection)_connectionFactory.CreateConnection();
+        var (connection, owned) = Lease(transaction);
+        try
+        {
+            using var command = CreateCommand(connection, statement, transaction as NpgsqlTransaction);
+            using var reader = command.ExecuteReader();
+            var results = new List<T>();
+            while (reader.Read())
+                results.Add(materializer.Read(reader));
+            return results;
+        }
+        finally { if (owned) connection.Dispose(); }
+    }
+
+    public int Execute(SqlStatement statement) => Execute(statement, null);
+
+    public int Execute(SqlStatement statement, DbTransaction? transaction)
+    {
+        var (connection, owned) = Lease(transaction);
+        try
+        {
+            using var command = CreateCommand(connection, statement, transaction as NpgsqlTransaction);
+            return command.ExecuteNonQuery();
+        }
+        finally { if (owned) connection.Dispose(); }
+    }
+
+    public TScalar? ExecuteScalar<TScalar>(SqlStatement statement) => ExecuteScalar<TScalar>(statement, null);
+
+    public TScalar? ExecuteScalar<TScalar>(SqlStatement statement, DbTransaction? transaction)
+    {
+        var (connection, owned) = Lease(transaction);
+        try
+        {
+            using var command = CreateCommand(connection, statement, transaction as NpgsqlTransaction);
+            return Coerce<TScalar>(command.ExecuteScalar());
+        }
+        finally { if (owned) connection.Dispose(); }
+    }
+
+    // ---- async ---------------------------------------------------------
+
+    public Task<List<T>> QueryAsync<T>(SqlStatement statement, IMaterializer<T> materializer, CancellationToken cancellationToken = default) =>
+        QueryAsync(statement, materializer, null, cancellationToken);
+
+    public async Task<List<T>> QueryAsync<T>(SqlStatement statement, IMaterializer<T> materializer, DbTransaction? transaction, CancellationToken cancellationToken = default)
+    {
+        var (connection, owned) = await LeaseAsync(transaction, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await using var command = CreateCommand(connection, statement, transaction as NpgsqlTransaction);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            var results = new List<T>();
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                results.Add(materializer.Read(reader));
+            return results;
+        }
+        finally { if (owned) await connection.DisposeAsync().ConfigureAwait(false); }
+    }
+
+    public Task<int> ExecuteAsync(SqlStatement statement, CancellationToken cancellationToken = default) =>
+        ExecuteAsync(statement, null, cancellationToken);
+
+    public async Task<int> ExecuteAsync(SqlStatement statement, DbTransaction? transaction, CancellationToken cancellationToken = default)
+    {
+        var (connection, owned) = await LeaseAsync(transaction, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await using var command = CreateCommand(connection, statement, transaction as NpgsqlTransaction);
+            return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally { if (owned) await connection.DisposeAsync().ConfigureAwait(false); }
+    }
+
+    public Task<TScalar?> ExecuteScalarAsync<TScalar>(SqlStatement statement, CancellationToken cancellationToken = default) =>
+        ExecuteScalarAsync<TScalar>(statement, null, cancellationToken);
+
+    public async Task<TScalar?> ExecuteScalarAsync<TScalar>(SqlStatement statement, DbTransaction? transaction, CancellationToken cancellationToken = default)
+    {
+        var (connection, owned) = await LeaseAsync(transaction, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await using var command = CreateCommand(connection, statement, transaction as NpgsqlTransaction);
+            return Coerce<TScalar>(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false));
+        }
+        finally { if (owned) await connection.DisposeAsync().ConfigureAwait(false); }
+    }
+
+    // ---- connection leasing -------------------------------------------
+
+    /// <summary>Returns the connection to use and whether this executor owns (must dispose) it.
+    /// With a transaction we reuse its open connection and never dispose it.</summary>
+    private (NpgsqlConnection Connection, bool Owned) Lease(DbTransaction? transaction)
+    {
+        if (transaction is not null)
+            return ((NpgsqlConnection)transaction.Connection!, false);
+        var connection = (NpgsqlConnection)_connectionFactory.CreateConnection();
+        connection.Open();
+        return (connection, true);
+    }
+
+    private async Task<(NpgsqlConnection Connection, bool Owned)> LeaseAsync(DbTransaction? transaction, CancellationToken cancellationToken)
+    {
+        if (transaction is not null)
+            return ((NpgsqlConnection)transaction.Connection!, false);
+        var connection = (NpgsqlConnection)_connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-        await using var command = CreateCommand(connection, statement);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-
-        var results = new List<T>();
-        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
-            results.Add(materializer.Read(reader));
-        return results;
+        return (connection, true);
     }
 
-    public List<T> Query<T>(SqlStatement statement, IMaterializer<T> materializer)
+    private static TScalar? Coerce<TScalar>(object? result)
     {
-        using var connection = (NpgsqlConnection)_connectionFactory.CreateConnection();
-        connection.Open();
-        using var command = CreateCommand(connection, statement);
-        using var reader = command.ExecuteReader();
-
-        var results = new List<T>();
-        while (reader.Read())
-            results.Add(materializer.Read(reader));
-        return results;
-    }
-
-    public int Execute(SqlStatement statement)
-    {
-        using var connection = (NpgsqlConnection)_connectionFactory.CreateConnection();
-        connection.Open();
-        using var command = CreateCommand(connection, statement);
-        return command.ExecuteNonQuery();
-    }
-
-    public TScalar? ExecuteScalar<TScalar>(SqlStatement statement)
-    {
-        using var connection = (NpgsqlConnection)_connectionFactory.CreateConnection();
-        connection.Open();
-        using var command = CreateCommand(connection, statement);
-        var result = command.ExecuteScalar();
         if (result is null || result is DBNull)
             return default;
         return (TScalar)Convert.ChangeType(result, typeof(TScalar), System.Globalization.CultureInfo.InvariantCulture);
     }
 
-    public async Task<int> ExecuteAsync(SqlStatement statement, CancellationToken cancellationToken = default)
-    {
-        await using var connection = (NpgsqlConnection)_connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-        await using var command = CreateCommand(connection, statement);
-        return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-    }
-
-    public async Task<TScalar?> ExecuteScalarAsync<TScalar>(
-        SqlStatement statement,
-        CancellationToken cancellationToken = default)
-    {
-        await using var connection = (NpgsqlConnection)_connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-        await using var command = CreateCommand(connection, statement);
-        var result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
-        if (result is null || result is DBNull)
-            return default;
-        return (TScalar)Convert.ChangeType(result, typeof(TScalar), System.Globalization.CultureInfo.InvariantCulture);
-    }
-
-    private static NpgsqlCommand CreateCommand(NpgsqlConnection connection, SqlStatement statement)
+    private static NpgsqlCommand CreateCommand(NpgsqlConnection connection, SqlStatement statement, NpgsqlTransaction? transaction)
     {
         var command = connection.CreateCommand();
         command.CommandText = statement.Sql;
+        if (transaction is not null)
+            command.Transaction = transaction;
 
         foreach (var binding in statement.Parameters)
         {

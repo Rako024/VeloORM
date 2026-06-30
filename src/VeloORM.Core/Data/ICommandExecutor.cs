@@ -1,3 +1,4 @@
+using System.Data.Common;
 using VeloORM.Materialization;
 using VeloORM.Query;
 
@@ -8,6 +9,11 @@ namespace VeloORM.Data;
 /// (the PostgreSQL implementation binds Npgsql positional parameters); the runtime engine
 /// depends only on this abstraction so it stays provider-agnostic.
 /// </summary>
+/// <remarks>
+/// Each method has a <see cref="DbTransaction"/> overload: when a transaction is supplied the command
+/// runs on that transaction's (already-open) connection and the connection is left open; otherwise a
+/// fresh pooled connection is opened and disposed per call.
+/// </remarks>
 public interface ICommandExecutor
 {
     List<T> Query<T>(SqlStatement statement, IMaterializer<T> materializer);
@@ -17,4 +23,13 @@ public interface ICommandExecutor
     Task<List<T>> QueryAsync<T>(SqlStatement statement, IMaterializer<T> materializer, CancellationToken cancellationToken = default);
     Task<int> ExecuteAsync(SqlStatement statement, CancellationToken cancellationToken = default);
     Task<TScalar?> ExecuteScalarAsync<TScalar>(SqlStatement statement, CancellationToken cancellationToken = default);
+
+    // Transaction-aware overloads. A null transaction is equivalent to the parameterless form.
+    List<T> Query<T>(SqlStatement statement, IMaterializer<T> materializer, DbTransaction? transaction);
+    int Execute(SqlStatement statement, DbTransaction? transaction);
+    TScalar? ExecuteScalar<TScalar>(SqlStatement statement, DbTransaction? transaction);
+
+    Task<List<T>> QueryAsync<T>(SqlStatement statement, IMaterializer<T> materializer, DbTransaction? transaction, CancellationToken cancellationToken = default);
+    Task<int> ExecuteAsync(SqlStatement statement, DbTransaction? transaction, CancellationToken cancellationToken = default);
+    Task<TScalar?> ExecuteScalarAsync<TScalar>(SqlStatement statement, DbTransaction? transaction, CancellationToken cancellationToken = default);
 }
