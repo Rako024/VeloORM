@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-test-pack:
+    runs-on: ubuntu-latest
+    env:
+      CI: "true"
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: velo
+          POSTGRES_PASSWORD: velo_dev_password
+          POSTGRES_DB: veloorm
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U velo -d veloorm"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Restore
+        run: dotnet restore VeloORM.slnx
+
+      - name: Build
+        run: dotnet build VeloORM.slnx -c Release --no-restore
+
+      - name: Test
+        env:
+          VELO_CONNECTION: "Host=localhost;Port=5432;Username=velo;Password=velo_dev_password;Database=veloorm"
+        run: dotnet test VeloORM.slnx -c Release --no-build
+
+      - name: Pack
+        run: dotnet pack VeloORM.slnx -c Release --no-build -o artifacts
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nuget-packages
+          path: artifacts/*.nupkg
+
+  # Publishing is manual / gated on a secret; uncomment and configure to enable.
+  # publish:
+  #   needs: build-test-pack
+  #   if: github.event_name == 'workflow_dispatch'
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/download-artifact@v4
+  #       with: { name: nuget-packages, path: artifacts }
+  #     - run: dotnet nuget push "artifacts/*.nupkg" --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate

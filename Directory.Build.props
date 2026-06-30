@@ -48,8 +48,14 @@
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <VersionPrefix>0.1.0</VersionPrefix>
-    <!-- Packages are produced explicitly in Phase 13; off by default. -->
-    <IsPackable>false</IsPackable>
+    <!-- Shipping libraries pack by default; tests/sample/benchmarks opt out via IsPackable=false. -->
+    <IsPackable>true</IsPackable>
   </PropertyGroup>
+
+  <!-- Pack the repo README + license into every package. -->
+  <ItemGroup Condition="'$(IsPackable)' == 'true'">
+    <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="\" Visible="false" />
+    <None Include="$(MSBuildThisFileDirectory)LICENSE" Pack="true" PackagePath="\" Visible="false" />
+  </ItemGroup>
 
 </Project>

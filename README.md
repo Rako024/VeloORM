@@ -22,11 +22,59 @@ enhancements layered on top.
 and the query falls back to the runtime engine. Performance may vary; correctness
 never does.
 
+## Quick start
+
+```bash
+dotnet add package VeloORM.Runtime
+dotnet add package VeloORM.Postgres
+dotnet add package VeloORM.Generator   # compile-time interceptors (optional)
+```
+
+```csharp
+using VeloORM.Metadata;
+using VeloORM.Postgres;
+using VeloORM.Runtime;
+
+[Table("products")]
+public class Product
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = "";
+    public decimal Price { get; set; }
+    public bool InStock { get; set; }
+}
+
+var factory = new NpgsqlConnectionFactory(connectionString);
+var db = new VeloDbContext(
+    VeloModel.Build([typeof(Product)]),
+    PostgresDialect.Instance,
+    factory,
+    new PostgresCommandExecutor(factory));
+
+// 1) Type-safe LINQ (runtime engine; intercepted at compile time when fully static)
+var all       = db.Set<Product>().ToList();
+var cheap     = db.Set<Product>().Where(p => p.Price < 10m).OrderBy(p => p.Name).ToList();
+
+// 2) Bool-gated optional filters (fragment engine — n fragments, not 2ⁿ)
+var results = db.FilteredQuery<Product>("SELECT id, name, price, in_stock FROM products")
+    .AndWhere(name is not null, $"name = {name}")
+    .AndWhere(min.HasValue,     $"price >= {min}")
+    .ToList();
+
+// 3) Raw SQL escape hatch (interpolated values are bound, never concatenated)
+var rows = db.Query<Product>($"SELECT * FROM products WHERE price >= {min}");
+```
+
+Build packages locally with `pwsh eng/pack.ps1` (outputs to `./artifacts`).
+
 ## Status
 
-🚧 Early development. Currently building the **foundation block (Phases 0–3)**:
-solution skeleton, core abstractions, the PostgreSQL provider, and the runtime
-query engine. See [CLAUDE.md](CLAUDE.md) for the architecture and phase roadmap.
+All planned phases (0–13) are implemented: runtime engine, compile-time
+interceptors, bool-gated fragments, diagnostics + `Query.Compile`, code-first
+migrations, DB-first scaffolding, the `velo` CLI, bulk `COPY`, the sample API,
+and NuGet packaging. See [CLAUDE.md](CLAUDE.md) for the architecture and the
+phase checklist. Some items are intentionally scoped for v1 (e.g. runtime
+`Join`/`GroupBy` and foreign-key migration diffing are marked as future work).
 
 ## Repository layout
 

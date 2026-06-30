@@ -42,11 +42,16 @@ public class MigrationTests : IAsyncLifetime
         _migrator = new Migrator(_factory);
         _scaffolder = new MigrationScaffolder(PostgresDialect.Instance);
 
-        // Clean slate.
+        // Clean slate: the migration diff is whole-schema, so drop every public table (other test
+        // classes share this database and leave tables behind).
         var exec = new PostgresCommandExecutor(_factory);
-        await exec.ExecuteAsync(new VeloORM.Query.SqlStatement(
-            "DROP TABLE IF EXISTS widgets CASCADE; DROP TABLE IF EXISTS __velo_migrations_history CASCADE;",
-            Array.Empty<VeloORM.Query.SqlParameterBinding>()));
+        await exec.ExecuteAsync(new VeloORM.Query.SqlStatement("""
+            DO $$ DECLARE r RECORD; BEGIN
+              FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = 'public') LOOP
+                EXECUTE 'DROP TABLE IF EXISTS public.' || quote_ident(r.tablename) || ' CASCADE';
+              END LOOP;
+            END $$;
+            """, Array.Empty<VeloORM.Query.SqlParameterBinding>()));
     }
 
     public Task DisposeAsync() => Task.CompletedTask;

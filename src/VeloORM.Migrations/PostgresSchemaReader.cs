@@ -111,11 +111,26 @@ public sealed class PostgresSchemaReader
             indexes.Add(new SchemaIndex
             {
                 Name = name,
-                Columns = Array.Empty<string>(), // compared by name only
+                Columns = ParseIndexColumns(def),
                 IsUnique = def.Contains("UNIQUE INDEX", StringComparison.OrdinalIgnoreCase),
             });
         }
         return indexes;
+    }
+
+    /// <summary>Extracts the column list from a pg_indexes <c>indexdef</c> (the parenthesized list).</summary>
+    private static List<string> ParseIndexColumns(string indexDef)
+    {
+        var open = indexDef.LastIndexOf('(');
+        var close = indexDef.LastIndexOf(')');
+        if (open < 0 || close <= open)
+            return new List<string>();
+
+        var inner = indexDef.Substring(open + 1, close - open - 1);
+        return inner.Split(',')
+            .Select(c => c.Trim().Trim('"'))
+            .Where(c => c.Length > 0)
+            .ToList();
     }
 
     private static DbDataReader Query(DbConnection conn, string sql)
