@@ -8,6 +8,8 @@ public enum NavigationKind
     Reference,
     /// <summary>One-to-many: the target entity holds the foreign key (e.g. <c>User.Orders</c>).</summary>
     Collection,
+    /// <summary>Many-to-many through a junction (pivot) table (e.g. <c>Post.Tags</c> via <c>post_tags</c>).</summary>
+    ManyToMany,
 }
 
 /// <summary>
@@ -45,4 +47,28 @@ public sealed class NavigationModel
 
     /// <summary>Column on the target entity.</summary>
     public string TargetKeyColumnName { get; }
+
+    // ---- many-to-many junction (set only when Kind == ManyToMany) ----
+
+    public string? JunctionSchema { get; private set; }
+    /// <summary>The junction (pivot) table name.</summary>
+    public string? JunctionTable { get; private set; }
+    /// <summary>Junction column referencing this entity's key (<see cref="LocalKeyColumnName"/>).</summary>
+    public string? JunctionLocalKeyColumn { get; private set; }
+    /// <summary>Junction column referencing the target entity's key (<see cref="TargetKeyColumnName"/>).</summary>
+    public string? JunctionTargetKeyColumn { get; private set; }
+
+    /// <summary>Builds a many-to-many navigation through an explicit junction table.</summary>
+    public static NavigationModel ManyToManyNav(
+        PropertyInfo property, Type targetClrType,
+        string localKeyColumnName, string targetKeyColumnName,
+        string? junctionSchema, string junctionTable,
+        string junctionLocalKeyColumn, string junctionTargetKeyColumn) =>
+        new(property, NavigationKind.ManyToMany, targetClrType, localKeyColumnName, targetKeyColumnName)
+        {
+            JunctionSchema = junctionSchema,
+            JunctionTable = junctionTable,
+            JunctionLocalKeyColumn = junctionLocalKeyColumn,
+            JunctionTargetKeyColumn = junctionTargetKeyColumn,
+        };
 }

@@ -22,6 +22,7 @@ public sealed class EntityConfiguration
     public List<string>? KeyProperties { get; set; }
     public Dictionary<string, PropertyConfiguration> Properties { get; } = new(StringComparer.Ordinal);
     public List<IndexConfiguration> Indexes { get; } = new();
+    public List<ManyToManyConfiguration> ManyToMany { get; } = new();
 
     /// <summary>A model-level filter (e.g. soft delete) auto-applied as a root WHERE on every runtime
     /// query for this entity, unless <c>IgnoreQueryFilters()</c> is used.</summary>
@@ -35,6 +36,17 @@ public sealed class EntityConfiguration
             Properties[name] = cfg = new PropertyConfiguration();
         return cfg;
     }
+}
+
+/// <summary>An explicit many-to-many relationship declared via fluent config.</summary>
+public sealed class ManyToManyConfiguration
+{
+    public required string NavigationProperty { get; init; }
+    public required Type TargetType { get; init; }
+    public string? JunctionSchema { get; init; }
+    public required string JunctionTable { get; init; }
+    public required string LocalKeyColumn { get; init; }   // junction column → declaring entity key
+    public required string TargetKeyColumn { get; init; }  // junction column → target entity key
 }
 
 /// <summary>Mutable fluent index declaration.</summary>
@@ -103,6 +115,25 @@ public sealed class EntityTypeBuilder<TEntity> where TEntity : class
     {
         var name = ExpressionHelpers.GetSinglePropertyName(propertyExpression);
         _cfg.PropertyFor(name).Ignored = true;
+        return this;
+    }
+
+    /// <summary>Declares a many-to-many navigation through an explicit junction table, e.g.
+    /// <c>HasManyToMany(p =&gt; p.Tags, "post_tags", "post_id", "tag_id")</c>. Declare each side that has
+    /// a navigation property.</summary>
+    public EntityTypeBuilder<TEntity> HasManyToMany<TTarget>(
+        Expression<Func<TEntity, IEnumerable<TTarget>>> navigation,
+        string junctionTable, string localKeyColumn, string targetKeyColumn, string? junctionSchema = null)
+    {
+        _cfg.ManyToMany.Add(new ManyToManyConfiguration
+        {
+            NavigationProperty = ExpressionHelpers.GetSinglePropertyName(navigation),
+            TargetType = typeof(TTarget),
+            JunctionSchema = junctionSchema,
+            JunctionTable = junctionTable,
+            LocalKeyColumn = localKeyColumn,
+            TargetKeyColumn = targetKeyColumn,
+        });
         return this;
     }
 

@@ -119,6 +119,9 @@ internal sealed class QueryEngine
 
     private CollectionIncludePlan BuildCollectionPlan(CollectionInclude include)
     {
+        if (include.Navigation.Kind == NavigationKind.ManyToMany)
+            return BuildManyToManyPlan(include);
+
         var dialect = _context.Dialect;
         var target = include.Target;
         // $1 binds the array of parent keys; the child FK column matches the parent key.
@@ -184,6 +187,45 @@ internal sealed class QueryEngine
         };
     }
 
+    private const string ManyToManyOwnerAlias = "__velo_owner";
+
+    /// <summary>Builds the follow-up plan for a many-to-many include: join the junction table and select
+    /// each target row plus the owning parent's key (aliased <c>__velo_owner</c>) so rows can be grouped
+    /// back to parents. <c>WHERE junction.localFk = ANY(parent keys)</c>.</summary>
+    private CollectionIncludePlan BuildManyToManyPlan(CollectionInclude include)
+    {
+        var dialect = _context.Dialect;
+        var target = include.Target;
+        var nav = include.Navigation;
+        string Q(string id) => dialect.QuoteIdentifier(id);
+
+        var select = string.Join(", ", target.Columns.Select(c => $"{Q("t")}.{Q(c.ColumnName)}"));
+        var sql =
+            $"SELECT {select}, {Q("j")}.{Q(nav.JunctionLocalKeyColumn!)} AS {Q(ManyToManyOwnerAlias)} " +
+            $"FROM {dialect.QuoteQualifiedName(target.Schema, target.TableName)} AS {Q("t")} " +
+            $"JOIN {dialect.QuoteQualifiedName(nav.JunctionSchema, nav.JunctionTable!)} AS {Q("j")} " +
+            $"ON {Q("t")}.{Q(nav.TargetKeyColumnName)} = {Q("j")}.{Q(nav.JunctionTargetKeyColumn!)} " +
+            $"WHERE {Q("j")}.{Q(nav.JunctionLocalKeyColumn!)} = ANY({dialect.RenderParameter(0)})";
+
+        var targetMaterializer = RuntimeMaterializerFactory.BuildEntityObject(target);
+        Func<DbDataReader, object> materializer = r =>
+        {
+            var entity = targetMaterializer(r);
+            var ord = r.GetOrdinal(ManyToManyOwnerAlias);
+            object? owner = r.IsDBNull(ord) ? null : r.GetValue(ord);
+            return new ManyToManyRow(entity, owner);
+        };
+
+        return new CollectionIncludePlan
+        {
+            Navigation = nav,
+            Target = target,
+            Sql = sql,
+            Materializer = materializer,
+            IsManyToMany = true,
+        };
+    }
+
     // Invoked via reflection (RunMethod) with the closed element type.
     private object? Run<TElement>(CompiledQuery compiled, SqlStatement statement)
     {
@@ -227,6 +269,12 @@ internal sealed class QueryEngine
     {
         foreach (var plan in plans)
         {
+            if (plan.IsManyToMany)
+            {
+                ApplyManyToManyInclude(parents, parentEntity, plan);
+                continue;
+            }
+
             var nav = plan.Navigation;
             var parentKeyColumn = parentEntity.Columns.First(c => c.ColumnName == nav.LocalKeyColumnName);
             var parentKeyProperty = parentKeyColumn.Property;
@@ -275,6 +323,56 @@ internal sealed class QueryEngine
         }
     }
 
+    /// <summary>Many-to-many follow-up: one query joins the junction, returns each target row grouped by
+    /// the owning parent key (read from <c>__velo_owner</c>), and assigns lists onto the parents.</summary>
+    private void ApplyManyToManyInclude(IList parents, EntityModel parentEntity, CollectionIncludePlan plan)
+    {
+        var nav = plan.Navigation;
+        var parentKeyColumn = parentEntity.Columns.First(c => c.ColumnName == nav.LocalKeyColumnName);
+        var parentKeyProperty = parentKeyColumn.Property;
+        var listType = typeof(List<>).MakeGenericType(plan.Target.ClrType);
+
+        var seen = new HashSet<object>();
+        var keys = new List<object>();
+        foreach (var parent in parents)
+            if (parentKeyProperty.GetValue(parent) is { } k && seen.Add(k))
+                keys.Add(k);
+
+        var byOwner = new Dictionary<object, IList>();
+        if (keys.Count > 0)
+        {
+            var keyArray = Array.CreateInstance(parentKeyColumn.ClrType, keys.Count);
+            for (int i = 0; i < keys.Count; i++) keyArray.SetValue(keys[i], i);
+
+            var statement = new SqlStatement(plan.Sql, [new SqlParameterBinding(keyArray, keyArray.GetType())]);
+            var rows = _context.Executor.Query(statement, new DelegateMaterializer<object>(plan.Materializer));
+            foreach (var obj in rows)
+            {
+                var row = (ManyToManyRow)obj;
+                if (row.Owner is not { } owner) continue;
+                if (!byOwner.TryGetValue(owner, out var list))
+                    byOwner[owner] = list = (IList)Activator.CreateInstance(listType)!;
+                list.Add(row.Entity);
+            }
+        }
+
+        foreach (var parent in parents)
+        {
+            var key = parentKeyProperty.GetValue(parent);
+            var list = key is not null && byOwner.TryGetValue(key, out var l)
+                ? l
+                : (IList)Activator.CreateInstance(listType)!;
+            nav.Property.SetValue(parent, list);
+        }
+    }
+
+    private sealed class ManyToManyRow
+    {
+        public ManyToManyRow(object entity, object? owner) { Entity = entity; Owner = owner; }
+        public object Entity { get; }
+        public object? Owner { get; }
+    }
+
     private sealed class CompiledQuery
     {
         public required string Sql { get; init; }
@@ -293,5 +391,6 @@ internal sealed class QueryEngine
         public required string Sql { get; init; }
         public required Func<DbDataReader, object> Materializer { get; init; }
         public CollectionIncludePlan[] ChildPlans { get; init; } = Array.Empty<CollectionIncludePlan>();
+        public bool IsManyToMany { get; init; }
     }
 }

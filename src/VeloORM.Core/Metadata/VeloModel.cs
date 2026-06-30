@@ -53,6 +53,39 @@ public sealed class VeloModel
         // Second pass: resolve navigations now that every entity's columns/keys are known.
         NavigationResolver.Resolve(models);
 
+        // Third pass: explicit many-to-many navigations (require a junction table, declared via fluent).
+        ApplyManyToMany(models, modelBuilder);
+
         return new VeloModel(models);
+    }
+
+    [RequiresUnreferencedCode("Reflects over entity properties to bind many-to-many navigations.")]
+    private static void ApplyManyToMany(List<EntityModel> models, ModelBuilder modelBuilder)
+    {
+        var byType = models.ToDictionary(m => m.ClrType);
+        foreach (var cfg in modelBuilder.Configurations)
+        {
+            if (cfg.ManyToMany.Count == 0)
+                continue;
+            if (!byType.TryGetValue(cfg.ClrType, out var entity) || entity.KeyColumns.Count != 1)
+                continue;
+
+            var added = new List<NavigationModel>(entity.Navigations);
+            foreach (var m2m in cfg.ManyToMany)
+            {
+                if (!byType.TryGetValue(m2m.TargetType, out var target) || target.KeyColumns.Count != 1)
+                    continue;
+                var property = cfg.ClrType.GetProperty(m2m.NavigationProperty);
+                if (property is null)
+                    continue;
+
+                added.Add(NavigationModel.ManyToManyNav(
+                    property, m2m.TargetType,
+                    localKeyColumnName: entity.KeyColumns[0].ColumnName,
+                    targetKeyColumnName: target.KeyColumns[0].ColumnName,
+                    m2m.JunctionSchema, m2m.JunctionTable, m2m.LocalKeyColumn, m2m.TargetKeyColumn));
+            }
+            entity.Navigations = added;
+        }
     }
 }
