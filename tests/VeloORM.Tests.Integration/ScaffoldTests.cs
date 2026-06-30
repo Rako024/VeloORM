@@ -17,6 +17,15 @@ public class ScaffoldTests : IAsyncLifetime
     {
         _factory = new NpgsqlConnectionFactory(_fixture.ConnectionString);
         var exec = new PostgresCommandExecutor(_factory);
+        // The scaffolder reflects over every table in the public schema. Other test classes in this
+        // collection share the database, so clear it first to keep this test order-independent.
+        await exec.ExecuteAsync(new SqlStatement("""
+            DO $$ DECLARE r record; BEGIN
+              FOR r IN SELECT tablename FROM pg_tables WHERE schemaname = 'public' LOOP
+                EXECUTE 'DROP TABLE IF EXISTS public.' || quote_ident(r.tablename) || ' CASCADE';
+              END LOOP;
+            END $$;
+            """, Array.Empty<SqlParameterBinding>()));
         await exec.ExecuteAsync(new SqlStatement("""
             DROP TABLE IF EXISTS customers CASCADE;
             CREATE TABLE customers (

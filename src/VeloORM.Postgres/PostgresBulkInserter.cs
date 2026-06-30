@@ -28,31 +28,7 @@ public sealed class PostgresBulkInserter
         using var connection = (NpgsqlConnection)_connectionFactory.CreateConnection();
         connection.Open();
         using var writer = connection.BeginBinaryImport(copySql);
-
-        foreach (var row in rows)
-        {
-            writer.StartRow();
-            foreach (var column in columns)
-            {
-                var value = column.Property.GetValue(row);
-                if (value is null)
-                {
-                    writer.WriteNull();
-                    continue;
-                }
-                if (value is Enum)
-                {
-                    var underlying = Enum.GetUnderlyingType(value.GetType());
-                    writer.Write(Convert.ChangeType(value, underlying, System.Globalization.CultureInfo.InvariantCulture), NpgsqlTypes.NpgsqlDbType.Integer);
-                    continue;
-                }
-                if (PostgresTypeMapper.GetNpgsqlDbType(column.ClrType) is { } dbType)
-                    writer.Write(value, dbType);
-                else
-                    writer.Write(value);
-            }
-        }
-
+        BulkCopyWriter.Write(writer, columns, rows);
         return writer.Complete();
     }
 
