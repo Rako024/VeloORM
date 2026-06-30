@@ -50,6 +50,9 @@ public sealed class VeloModel
         foreach (var type in allTypes)
             models.Add(factory.Create(type, modelBuilder.FindConfiguration(type)));
 
+        // Second pass: resolve navigations now that every entity's columns/keys are known.
+        NavigationResolver.Resolve(models);
+
         return new VeloModel(models);
     }
 }

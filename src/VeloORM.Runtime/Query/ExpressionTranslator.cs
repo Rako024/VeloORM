@@ -6,37 +6,53 @@ using VeloORM.Query;
 namespace VeloORM.Runtime.Internal;
 
 /// <summary>
-/// Translates a single-table LINQ expression tree into a <see cref="QueryModel"/>, a list of bound
-/// parameter values (in placeholder order), a <see cref="ProjectionPlan"/>, and a shape key.
-/// Values are always lifted into bound parameters — never inlined — so injection is impossible by
-/// construction. Unsupported shapes throw <see cref="NotSupportedException"/> (never wrong SQL).
+/// Translates a LINQ expression tree into a <see cref="QueryModel"/>, bound parameters (in placeholder
+/// order), a <see cref="ProjectionPlan"/>, and a shape key. Supports a single root table plus joins:
+/// reference-navigation access (auto LEFT JOIN), explicit <c>Join</c>, and <c>Include</c> (reference
+/// via JOIN, collection via a follow-up query). Values are always lifted into bound parameters — never
+/// inlined — so injection is impossible. Unsupported shapes throw <see cref="NotSupportedException"/>.
 /// </summary>
 internal sealed class ExpressionTranslator
 {
     private readonly VeloModel _model;
-    private const string RootAlias = "t0";
 
     private EntityModel _rootEntity = null!;
+    private string _rootAlias = null!;
     private QueryModel _query = null!;
+    private int _aliasCounter;
+
     private readonly List<SqlParameterBinding> _parameters = new();
-    private ProjectionPlan _projection = null!;
-    private bool _projected;
+    private readonly Dictionary<ParameterExpression, (string Alias, EntityModel Entity)> _paramSources = new();
+    private readonly Dictionary<(string SourceAlias, string Nav), (string Alias, EntityModel Entity)> _refJoins = new();
+    private readonly List<ReferenceInclude> _referenceIncludes = new();
+    private readonly List<CollectionInclude> _collectionIncludes = new();
+
+    private ProjectionPlan? _projection;
 
     public ExpressionTranslator(VeloModel model) => _model = model;
 
     public TranslationResult Translate(Expression expression)
     {
         VisitChain(expression);
-        var key = ShapeKey.Compute(_query, _projection);
+        BuildFinalSelect();
+
+        var key = ShapeKey.Compute(_query, _projection!);
+        if (_collectionIncludes.Count > 0)
+            key += "|CI:" + string.Join(",", _collectionIncludes.Select(c => c.Navigation.PropertyName));
+
         return new TranslationResult
         {
             Model = _query,
             Parameters = _parameters,
             Terminal = _query.Terminal,
-            Projection = _projection,
+            Projection = _projection!,
+            RootEntity = _rootEntity,
+            CollectionIncludes = _collectionIncludes,
             Key = key,
         };
     }
+
+    private string NewAlias() => "t" + _aliasCounter++;
 
     // ---- operator chain -------------------------------------------------
 
@@ -59,15 +75,9 @@ internal sealed class ExpressionTranslator
     private void InitializeRoot(Type entityType)
     {
         _rootEntity = _model.GetEntity(entityType);
-        _query = new QueryModel(_rootEntity.Schema, _rootEntity.TableName, RootAlias);
-        foreach (var col in _rootEntity.Columns)
-            _query.Select.Add(new SelectItem(new SqlColumn(RootAlias, col.ColumnName, col.ClrType), col.ColumnName));
-        _projection = new ProjectionPlan
-        {
-            Kind = ProjectionKind.Entity,
-            ResultType = _rootEntity.ClrType,
-            Entity = _rootEntity,
-        };
+        _rootAlias = NewAlias();
+        _query = new QueryModel(_rootEntity.Schema, _rootEntity.TableName, _rootAlias);
+        // SELECT items are built at the end (BuildFinalSelect), once includes/projection are known.
     }
 
     private void ApplyOperator(MethodCallExpression call)
@@ -75,10 +85,11 @@ internal sealed class ExpressionTranslator
         switch (call.Method.Name)
         {
             case "Where":
-                AndWhere(TranslateExpression(GetLambda(call.Arguments[1]).Body));
+                AndWhere(TranslateRootLambda(GetLambda(call.Arguments[1])));
                 break;
             case "Select":
-                ApplySelect(GetLambda(call.Arguments[1]));
+                MapRoot(GetLambda(call.Arguments[1]).Parameters[0]);
+                BuildProjection(StripConvert(GetLambda(call.Arguments[1]).Body));
                 break;
             case "OrderBy":
                 _query.OrderBy.Clear();
@@ -102,6 +113,12 @@ internal sealed class ExpressionTranslator
                 break;
             case "Distinct":
                 _query.Distinct = true;
+                break;
+            case "Include":
+                ApplyInclude(GetLambda(call.Arguments[1]));
+                break;
+            case "Join":
+                ApplyJoin(call);
                 break;
             case "First":
             case "FirstOrDefault":
@@ -131,73 +148,189 @@ internal sealed class ExpressionTranslator
     private void ApplyOptionalPredicate(MethodCallExpression call)
     {
         if (call.Arguments.Count == 2)
-            AndWhere(TranslateExpression(GetLambda(call.Arguments[1]).Body));
+            AndWhere(TranslateRootLambda(GetLambda(call.Arguments[1])));
     }
 
-    private void AddOrdering(MethodCallExpression call, bool descending)
-    {
-        var expr = TranslateExpression(GetLambda(call.Arguments[1]).Body);
-        _query.OrderBy.Add(new Ordering(expr, descending));
-    }
+    private void AddOrdering(MethodCallExpression call, bool descending) =>
+        _query.OrderBy.Add(new Ordering(TranslateRootLambda(GetLambda(call.Arguments[1])), descending));
 
     private void AndWhere(SqlExpression predicate) =>
         _query.Where = _query.Where is null ? predicate : new SqlBinary(_query.Where, SqlBinaryOperator.And, predicate);
 
-    // ---- projection -----------------------------------------------------
-
-    private void ApplySelect(LambdaExpression lambda)
+    private SqlExpression TranslateRootLambda(LambdaExpression lambda)
     {
-        var body = StripConvert(lambda.Body);
-
-        // Select(x => x): entity passthrough; nothing changes.
-        if (body is ParameterExpression)
-            return;
-
-        EnsureNotAlreadyProjected();
-        _query.Select.Clear();
-
-        switch (body)
-        {
-            case NewExpression newExpr when newExpr.Members is { Count: > 0 }:
-            {
-                var args = new (string Alias, Type Type)[newExpr.Arguments.Count];
-                for (int i = 0; i < newExpr.Arguments.Count; i++)
-                {
-                    var alias = newExpr.Members[i].Name;
-                    _query.Select.Add(new SelectItem(TranslateExpression(newExpr.Arguments[i]), alias));
-                    args[i] = (alias, newExpr.Arguments[i].Type);
-                }
-                _projection = new ProjectionPlan
-                {
-                    Kind = ProjectionKind.Constructor,
-                    ResultType = newExpr.Type,
-                    Constructor = newExpr.Constructor,
-                    ConstructorArgs = args,
-                };
-                break;
-            }
-            default:
-            {
-                // Single scalar projection: Select(x => x.Prop) or a computed scalar.
-                const string alias = "c0";
-                _query.Select.Add(new SelectItem(TranslateExpression(body), alias));
-                _projection = new ProjectionPlan
-                {
-                    Kind = ProjectionKind.Scalar,
-                    ResultType = body.Type,
-                    ScalarAlias = alias,
-                };
-                break;
-            }
-        }
-
-        _projected = true;
+        MapRoot(lambda.Parameters[0]);
+        return TranslateExpression(lambda.Body);
     }
 
-    private void EnsureNotAlreadyProjected()
+    private void MapRoot(ParameterExpression parameter) => _paramSources[parameter] = (_rootAlias, _rootEntity);
+
+    // ---- Include --------------------------------------------------------
+
+    private void ApplyInclude(LambdaExpression navigationSelector)
     {
-        if (_projected)
-            throw new NotSupportedException("Multiple Select projections in one query are not supported.");
+        MapRoot(navigationSelector.Parameters[0]);
+        if (StripConvert(navigationSelector.Body) is not MemberExpression member)
+            throw new NotSupportedException("Include expects a navigation property selector.");
+
+        var (sourceAlias, sourceEntity) = ResolveSource(member.Expression!);
+        var nav = sourceEntity.FindNavigation(member.Member.Name)
+            ?? throw new NotSupportedException(
+                $"'{member.Member.Name}' on '{sourceEntity.ClrType.Name}' is not a navigation.");
+
+        if (nav.Kind == NavigationKind.Reference)
+        {
+            var (alias, target) = EnsureReferenceJoin(sourceAlias, sourceEntity, nav);
+            if (_referenceIncludes.All(r => r.AliasPrefix != alias))
+                _referenceIncludes.Add(new ReferenceInclude { Navigation = nav, Target = target, AliasPrefix = alias });
+        }
+        else
+        {
+            var target = _model.GetEntity(nav.TargetClrType);
+            if (_collectionIncludes.All(c => c.Navigation.PropertyName != nav.PropertyName))
+                _collectionIncludes.Add(new CollectionInclude { Navigation = nav, Target = target });
+        }
+    }
+
+    // ---- Join -----------------------------------------------------------
+
+    private void ApplyJoin(MethodCallExpression call)
+    {
+        if (call.Arguments[1] is not ConstantExpression { Value: IQueryable inner })
+            throw new NotSupportedException("Join inner source must be a direct Set<T>().");
+
+        var innerEntity = _model.GetEntity(inner.ElementType);
+        var innerAlias = NewAlias();
+
+        var outerKey = GetLambda(call.Arguments[2]);
+        MapRoot(outerKey.Parameters[0]);
+        var outerColumn = TranslateExpression(outerKey.Body);
+
+        var innerKey = GetLambda(call.Arguments[3]);
+        _paramSources[innerKey.Parameters[0]] = (innerAlias, innerEntity);
+        var innerColumn = TranslateExpression(innerKey.Body);
+
+        _query.Joins.Add(new JoinClause(
+            JoinKind.Inner, innerEntity.Schema, innerEntity.TableName, innerAlias,
+            new SqlBinary(outerColumn, SqlBinaryOperator.Equal, innerColumn)));
+
+        var resultSelector = GetLambda(call.Arguments[4]);
+        _paramSources[resultSelector.Parameters[0]] = (_rootAlias, _rootEntity);
+        _paramSources[resultSelector.Parameters[1]] = (innerAlias, innerEntity);
+        BuildProjection(StripConvert(resultSelector.Body));
+    }
+
+    // ---- projection -----------------------------------------------------
+
+    private void BuildProjection(Expression body)
+    {
+        if (body is ParameterExpression)
+            return; // Select(x => x): keep entity passthrough (built at the end)
+
+        if (_projection is not null)
+            throw new NotSupportedException("Multiple projections in one query are not supported.");
+
+        _query.Select.Clear();
+
+        if (body is NewExpression { Members.Count: > 0 } newExpr)
+        {
+            var args = new (string Alias, Type Type)[newExpr.Arguments.Count];
+            for (int i = 0; i < newExpr.Arguments.Count; i++)
+            {
+                var alias = newExpr.Members[i].Name;
+                _query.Select.Add(new SelectItem(TranslateExpression(newExpr.Arguments[i]), alias));
+                args[i] = (alias, newExpr.Arguments[i].Type);
+            }
+            _projection = new ProjectionPlan
+            {
+                Kind = ProjectionKind.Constructor,
+                ResultType = newExpr.Type,
+                Constructor = newExpr.Constructor,
+                ConstructorArgs = args,
+            };
+            return;
+        }
+
+        const string scalarAlias = "c0";
+        _query.Select.Add(new SelectItem(TranslateExpression(body), scalarAlias));
+        _projection = new ProjectionPlan
+        {
+            Kind = ProjectionKind.Scalar,
+            ResultType = body.Type,
+            ScalarAlias = scalarAlias,
+        };
+    }
+
+    /// <summary>Builds the SELECT list for the default (non-projected) cases at the end of translation.</summary>
+    private void BuildFinalSelect()
+    {
+        if (_projection is not null)
+            return; // an explicit Select / Join already defined the projection + SELECT
+
+        if (_referenceIncludes.Count == 0)
+        {
+            foreach (var col in _rootEntity.Columns)
+                _query.Select.Add(new SelectItem(new SqlColumn(_rootAlias, col.ColumnName, col.ClrType), col.ColumnName));
+            _projection = new ProjectionPlan { Kind = ProjectionKind.Entity, ResultType = _rootEntity.ClrType, Entity = _rootEntity };
+            return;
+        }
+
+        // Entity graph: prefix every column with its source alias so names never collide.
+        foreach (var col in _rootEntity.Columns)
+            _query.Select.Add(new SelectItem(new SqlColumn(_rootAlias, col.ColumnName, col.ClrType), $"{_rootAlias}_{col.ColumnName}"));
+        foreach (var include in _referenceIncludes)
+            foreach (var col in include.Target.Columns)
+                _query.Select.Add(new SelectItem(new SqlColumn(include.AliasPrefix, col.ColumnName, col.ClrType), $"{include.AliasPrefix}_{col.ColumnName}"));
+
+        _projection = new ProjectionPlan
+        {
+            Kind = ProjectionKind.EntityGraph,
+            ResultType = _rootEntity.ClrType,
+            Entity = _rootEntity,
+            RootAliasPrefix = _rootAlias,
+            ReferenceIncludes = _referenceIncludes,
+        };
+    }
+
+    // ---- source / navigation resolution --------------------------------
+
+    private (string Alias, EntityModel Entity) ResolveSource(Expression expression)
+    {
+        expression = StripConvert(expression);
+        switch (expression)
+        {
+            case ParameterExpression p when _paramSources.TryGetValue(p, out var src):
+                return src;
+            case MemberExpression m:
+            {
+                var (alias, entity) = ResolveSource(m.Expression!);
+                var nav = entity.FindNavigation(m.Member.Name);
+                if (nav is { Kind: NavigationKind.Reference })
+                    return EnsureReferenceJoin(alias, entity, nav);
+                throw new NotSupportedException($"'{m.Member.Name}' is not a reference navigation on '{entity.ClrType.Name}'.");
+            }
+            default:
+                throw new NotSupportedException($"Cannot resolve query source from '{expression.NodeType}'.");
+        }
+    }
+
+    private (string Alias, EntityModel Entity) EnsureReferenceJoin(string sourceAlias, EntityModel sourceEntity, NavigationModel nav)
+    {
+        var cacheKey = (sourceAlias, nav.PropertyName);
+        if (_refJoins.TryGetValue(cacheKey, out var existing))
+            return existing;
+
+        var target = _model.GetEntity(nav.TargetClrType);
+        var alias = NewAlias();
+        var on = new SqlBinary(
+            new SqlColumn(sourceAlias, nav.LocalKeyColumnName, typeof(object)),
+            SqlBinaryOperator.Equal,
+            new SqlColumn(alias, nav.TargetKeyColumnName, typeof(object)));
+        _query.Joins.Add(new JoinClause(JoinKind.Left, target.Schema, target.TableName, alias, on));
+
+        var result = (alias, target);
+        _refJoins[cacheKey] = result;
+        return result;
     }
 
     // ---- expression translation ----------------------------------------
@@ -206,8 +339,7 @@ internal sealed class ExpressionTranslator
     {
         expression = StripConvert(expression);
 
-        // Any subtree that does not reference the entity parameter is a value -> bound parameter.
-        if (!ReferencesRoot(expression))
+        if (!ReferencesScope(expression))
             return Parameter(Evaluate(expression), expression.Type);
 
         return expression switch
@@ -234,25 +366,20 @@ internal sealed class ExpressionTranslator
         if (member.Member.Name == "Length" && member.Expression?.Type == typeof(string))
             return new SqlFunction("char_length", [TranslateExpression(member.Expression)]);
 
-        // Direct entity property -> column.
-        if (member.Expression is ParameterExpression)
-        {
-            var col = _rootEntity.FindColumnByProperty(member.Member.Name)
-                ?? throw new NotSupportedException(
-                    $"Property '{member.Member.Name}' on '{_rootEntity.ClrType.Name}' is not a mapped column.");
-            return new SqlColumn(RootAlias, col.ColumnName, col.ClrType);
-        }
-
-        throw new NotSupportedException($"Unsupported member access '{member}'.");
+        // Resolve the owning source (root parameter, joined parameter, or a reference-navigation chain).
+        var (alias, entity) = ResolveSource(member.Expression!);
+        var col = entity.FindColumnByProperty(member.Member.Name)
+            ?? throw new NotSupportedException(
+                $"Property '{member.Member.Name}' on '{entity.ClrType.Name}' is not a mapped column.");
+        return new SqlColumn(alias, col.ColumnName, col.ClrType);
     }
 
     private SqlExpression TranslateBinary(BinaryExpression binary)
     {
-        // Null comparison -> IS [NOT] NULL.
         if (binary.NodeType is ExpressionType.Equal or ExpressionType.NotEqual)
         {
-            bool leftNull = !ReferencesRoot(binary.Left) && Evaluate(binary.Left) is null;
-            bool rightNull = !ReferencesRoot(binary.Right) && Evaluate(binary.Right) is null;
+            bool leftNull = !ReferencesScope(binary.Left) && Evaluate(binary.Left) is null;
+            bool rightNull = !ReferencesScope(binary.Right) && Evaluate(binary.Right) is null;
             if (leftNull ^ rightNull)
             {
                 var operand = leftNull ? binary.Right : binary.Left;
@@ -268,11 +395,9 @@ internal sealed class ExpressionTranslator
     {
         var name = call.Method.Name;
 
-        // Collection.Contains(item) / Enumerable.Contains(collection, item) -> IN (...)
         if (name == "Contains" && TryTranslateContains(call, out var inExpr))
             return inExpr!;
 
-        // string instance methods
         if (call.Object is { } target && target.Type == typeof(string))
         {
             var operand = TranslateExpression(target);
@@ -298,21 +423,19 @@ internal sealed class ExpressionTranslator
 
         if (call.Object is { } obj && obj.Type != typeof(string) && IsEnumerable(obj.Type))
         {
-            collection = obj;            // list.Contains(x.Id)
+            collection = obj;
             item = call.Arguments[0];
         }
         else if (call.Arguments.Count == 2)
         {
-            collection = call.Arguments[0]; // Enumerable.Contains(list, x.Id)
+            collection = call.Arguments[0];
             item = call.Arguments[1];
         }
 
-        // On modern runtimes array/list.Contains binds to MemoryExtensions.Contains(ReadOnlySpan<T>, T)
-        // via an implicit array->span conversion; unwrap it back to the underlying collection.
         if (collection is not null)
             collection = UnwrapImplicitConversion(collection);
 
-        if (collection is null || item is null || ReferencesRoot(collection) || !ReferencesRoot(item))
+        if (collection is null || item is null || ReferencesScope(collection) || !ReferencesScope(item))
             return false;
 
         var values = new List<SqlExpression>();
@@ -333,8 +456,6 @@ internal sealed class ExpressionTranslator
         return parameter;
     }
 
-    /// <summary>Evaluates a value subexpression (constant / closure capture / member chain) without
-    /// compiling where possible. Compilation is a last resort for shapes like method calls.</summary>
     private static object? Evaluate(Expression expression)
     {
         expression = StripConvert(expression);
@@ -351,8 +472,7 @@ internal sealed class ExpressionTranslator
                     array.SetValue(Evaluate(na.Expressions[i]), i);
                 return array;
             default:
-                var compiled = Expression.Lambda(expression).Compile();
-                return compiled.DynamicInvoke();
+                return Expression.Lambda(expression).Compile().DynamicInvoke();
         }
     }
 
@@ -378,16 +498,15 @@ internal sealed class ExpressionTranslator
     private static Expression StripConvert(Expression expression)
     {
         while (expression is UnaryExpression { NodeType: ExpressionType.Convert or ExpressionType.ConvertChecked } u
-               && Nullable.GetUnderlyingType(u.Type) == u.Operand.Type) // only strip lifting-to-nullable converts
+               && Nullable.GetUnderlyingType(u.Type) == u.Operand.Type)
             expression = u.Operand;
-        // Also strip object/enum boxing converts that don't change semantics.
         if (expression is UnaryExpression { NodeType: ExpressionType.Convert or ExpressionType.ConvertChecked } c
             && (c.Type == typeof(object) || c.Type.IsAssignableFrom(c.Operand.Type)))
             return c.Operand;
         return expression;
     }
 
-    private bool ReferencesRoot(Expression expression) => RootReferenceFinder.Contains(expression, _rootEntity.ClrType);
+    private bool ReferencesScope(Expression expression) => ScopeReferenceFinder.Contains(expression, _paramSources.Keys);
 
     private static Expression UnwrapImplicitConversion(Expression e) =>
         e is MethodCallExpression { Method.Name: "op_Implicit", Object: null, Arguments.Count: 1 } mc
@@ -395,8 +514,7 @@ internal sealed class ExpressionTranslator
             : e;
 
     private static bool IsEnumerable(Type type) =>
-        type != typeof(string) && type.GetInterfaces().Append(type).Any(i =>
-            i == typeof(System.Collections.IEnumerable));
+        type != typeof(string) && type.GetInterfaces().Append(type).Any(i => i == typeof(System.Collections.IEnumerable));
 
     private static Type GetEnumerableElementType(Type type)
     {
@@ -429,28 +547,35 @@ internal sealed class ExpressionTranslator
         _ => throw new NotSupportedException($"Binary operator '{nodeType}' is not supported."),
     };
 
-    /// <summary>Finds whether an expression references a parameter of the root entity type.</summary>
-    private sealed class RootReferenceFinder : ExpressionVisitor
+    /// <summary>Finds whether an expression references any in-scope query parameter.</summary>
+    private sealed class ScopeReferenceFinder : ExpressionVisitor
     {
-        private readonly Type _rootType;
+        private readonly IReadOnlyCollection<ParameterExpression> _scope;
         private bool _found;
 
-        private RootReferenceFinder(Type rootType) => _rootType = rootType;
+        private ScopeReferenceFinder(IReadOnlyCollection<ParameterExpression> scope) => _scope = scope;
 
-        public static bool Contains(Expression expression, Type rootType)
+        public static bool Contains(Expression expression, IReadOnlyCollection<ParameterExpression> scope)
         {
-            var finder = new RootReferenceFinder(rootType);
+            var finder = new ScopeReferenceFinder(scope);
             finder.Visit(expression);
             return finder._found;
         }
 
         protected override Expression VisitParameter(ParameterExpression node)
         {
-            if (node.Type == _rootType)
+            if (_scope.Contains(node))
                 _found = true;
             return node;
         }
     }
+}
+
+/// <summary>A collection navigation to load by a follow-up query and stitch by foreign key.</summary>
+internal sealed class CollectionInclude
+{
+    public required NavigationModel Navigation { get; init; }
+    public required EntityModel Target { get; init; }
 }
 
 /// <summary>The product of translating a LINQ expression for the runtime engine.</summary>
@@ -460,5 +585,7 @@ internal sealed class TranslationResult
     public required List<SqlParameterBinding> Parameters { get; init; }
     public required QueryTerminal Terminal { get; init; }
     public required ProjectionPlan Projection { get; init; }
+    public required EntityModel RootEntity { get; init; }
+    public required IReadOnlyList<CollectionInclude> CollectionIncludes { get; init; }
     public required string Key { get; init; }
 }

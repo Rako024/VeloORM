@@ -1,7 +1,9 @@
+using System.Collections;
 using System.Collections.Concurrent;
 using System.Data.Common;
 using System.Linq.Expressions;
 using System.Reflection;
+using VeloORM.Metadata;
 using VeloORM.Query;
 using VeloORM.Runtime.Materialization;
 
@@ -74,9 +76,36 @@ internal sealed class QueryEngine
             compiled.Materializer = RuntimeMaterializerFactory.Build(translation.Projection);
             compiled.ResultElementType = translation.Projection.ResultType;
             compiled.RunMethod = RunOpenMethod.MakeGenericMethod(translation.Projection.ResultType);
+            compiled.ParentEntity = translation.RootEntity;
+            compiled.CollectionPlans = BuildCollectionPlans(translation.CollectionIncludes);
         }
 
         return compiled;
+    }
+
+    private CollectionIncludePlan[] BuildCollectionPlans(IReadOnlyList<CollectionInclude> includes)
+    {
+        if (includes.Count == 0)
+            return Array.Empty<CollectionIncludePlan>();
+
+        var dialect = _context.Dialect;
+        var plans = new CollectionIncludePlan[includes.Count];
+        for (int i = 0; i < includes.Count; i++)
+        {
+            var target = includes[i].Target;
+            var columns = string.Join(", ", target.Columns.Select(c => dialect.QuoteIdentifier(c.ColumnName)));
+            // SELECT <cols> FROM <target> WHERE <fk> = ANY($1)  — $1 binds the array of parent keys.
+            var sql = $"SELECT {columns} FROM {dialect.QuoteQualifiedName(target.Schema, target.TableName)} " +
+                      $"WHERE {dialect.QuoteIdentifier(includes[i].Navigation.TargetKeyColumnName)} = ANY({dialect.RenderParameter(0)})";
+            plans[i] = new CollectionIncludePlan
+            {
+                Navigation = includes[i].Navigation,
+                Target = target,
+                Sql = sql,
+                Materializer = RuntimeMaterializerFactory.BuildEntityObject(target),
+            };
+        }
+        return plans;
     }
 
     // Invoked via reflection (RunMethod) with the closed element type.
@@ -84,6 +113,9 @@ internal sealed class QueryEngine
     {
         var materialize = (Func<DbDataReader, TElement>)compiled.Materializer!;
         var rows = _context.Executor.Query(statement, new DelegateMaterializer<TElement>(materialize));
+
+        if (compiled.CollectionPlans.Length > 0 && rows.Count > 0)
+            ApplyCollectionIncludes(rows, compiled.ParentEntity!, compiled.CollectionPlans);
 
         return compiled.Terminal switch
         {
@@ -113,6 +145,54 @@ internal sealed class QueryEngine
 
     private static InvalidOperationException NoElements() => new("Sequence contains no elements.");
 
+    /// <summary>Loads each collection navigation with one follow-up query (WHERE fk = ANY(parent keys))
+    /// and stitches the children onto the materialized parents by foreign key.</summary>
+    private void ApplyCollectionIncludes(IList parents, EntityModel parentEntity, CollectionIncludePlan[] plans)
+    {
+        foreach (var plan in plans)
+        {
+            var nav = plan.Navigation;
+            var parentKeyColumn = parentEntity.Columns.First(c => c.ColumnName == nav.LocalKeyColumnName);
+            var parentKeyProperty = parentKeyColumn.Property;
+            var childFkProperty = plan.Target.Columns.First(c => c.ColumnName == nav.TargetKeyColumnName).Property;
+            var listType = typeof(List<>).MakeGenericType(plan.Target.ClrType);
+
+            // Distinct, non-null parent keys.
+            var seen = new HashSet<object>();
+            var keys = new List<object>();
+            foreach (var parent in parents)
+                if (parentKeyProperty.GetValue(parent) is { } k && seen.Add(k))
+                    keys.Add(k);
+
+            var byForeignKey = new Dictionary<object, IList>();
+            if (keys.Count > 0)
+            {
+                var keyArray = Array.CreateInstance(parentKeyColumn.ClrType, keys.Count);
+                for (int i = 0; i < keys.Count; i++) keyArray.SetValue(keys[i], i);
+
+                var statement = new SqlStatement(plan.Sql, [new SqlParameterBinding(keyArray, keyArray.GetType())]);
+                var children = _context.Executor.Query(statement, new DelegateMaterializer<object>(plan.Materializer));
+
+                foreach (var child in children)
+                {
+                    if (childFkProperty.GetValue(child) is not { } fk) continue;
+                    if (!byForeignKey.TryGetValue(fk, out var list))
+                        byForeignKey[fk] = list = (IList)Activator.CreateInstance(listType)!;
+                    list.Add(child);
+                }
+            }
+
+            foreach (var parent in parents)
+            {
+                var key = parentKeyProperty.GetValue(parent);
+                var list = key is not null && byForeignKey.TryGetValue(key, out var l)
+                    ? l
+                    : (IList)Activator.CreateInstance(listType)!;
+                nav.Property.SetValue(parent, list);
+            }
+        }
+    }
+
     private sealed class CompiledQuery
     {
         public required string Sql { get; init; }
@@ -120,5 +200,15 @@ internal sealed class QueryEngine
         public Delegate? Materializer { get; set; }
         public Type? ResultElementType { get; set; }
         public MethodInfo? RunMethod { get; set; }
+        public EntityModel? ParentEntity { get; set; }
+        public CollectionIncludePlan[] CollectionPlans { get; set; } = Array.Empty<CollectionIncludePlan>();
+    }
+
+    private sealed class CollectionIncludePlan
+    {
+        public required NavigationModel Navigation { get; init; }
+        public required EntityModel Target { get; init; }
+        public required string Sql { get; init; }
+        public required Func<DbDataReader, object> Materializer { get; init; }
     }
 }

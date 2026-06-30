@@ -21,6 +21,13 @@ public sealed class EntityModel
         _byProperty = columns.ToDictionary(c => c.PropertyName, StringComparer.Ordinal);
     }
 
+    /// <summary>Navigations to other entities. Populated by the navigation resolver after every
+    /// entity's columns are known (a navigation needs the target's table/key).</summary>
+    public IReadOnlyList<NavigationModel> Navigations { get; internal set; } = Array.Empty<NavigationModel>();
+
+    public NavigationModel? FindNavigation(string propertyName) =>
+        Navigations.FirstOrDefault(n => string.Equals(n.PropertyName, propertyName, StringComparison.Ordinal));
+
     public Type ClrType { get; }
 
     public string TableName { get; }

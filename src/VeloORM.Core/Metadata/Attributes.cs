@@ -37,6 +37,20 @@ public sealed class KeyAttribute : Attribute
 [AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
 public sealed class NotMappedAttribute : Attribute;
 
+/// <summary>
+/// Names the foreign-key property for a navigation. Applied to a navigation property, the name is the
+/// scalar FK property on the dependent entity (e.g. <c>[ForeignKey("CustomerId")]</c> on
+/// <c>Order.Customer</c>, or on <c>Customer.Orders</c> naming <c>Order.CustomerId</c>).
+/// </summary>
+[AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
+public sealed class ForeignKeyAttribute : Attribute
+{
+    public ForeignKeyAttribute(string name) => Name = name;
+
+    /// <summary>The FK property name (resolved to its column).</summary>
+    public string Name { get; }
+}
+
 /// <summary>How a column's value is produced by the store.</summary>
 public enum StoreGenerated
 {
