@@ -119,7 +119,9 @@ docker/docker-compose.yml         Postgres 16 + Adminer
 Execution order. After each phase: build, run tests, tick the box, write a brief
 "PHASE N COMPLETE" report, and commit.
 
-> **Current scope:** Phases 0–3 (foundation block), then stop for review.
+> **Current scope:** Phases 0–13 complete. **Active block: Phase 14–17 (Priority 1 —
+> high-performance core), then stop for review.** Phases 18–21 (Priority 2 — enterprise
+> relational features) follow only on explicit "continue".
 
 - [x] **Phase 0** — Skeleton & infrastructure (solution, projects, Directory.Build.props, docker-compose, README/LICENSE/CLAUDE.md). Compiles; `docker compose up -d` works. ✅
 - [x] **Phase 1** — Core abstractions (IDbContext, DbSet<T>, metadata model, ISqlDialect, query model AST, IMaterializer). Unit tests pass (19 tests). ✅
@@ -135,6 +137,29 @@ Execution order. After each phase: build, run tests, tick the box, write a brief
 - [x] **Phase 11** — Bulk (`COPY`) & performance. `PostgresBulkInserter` (binary COPY, skips identity columns) — 1000-row COPY integration test. `benchmarks/VeloORM.Benchmarks` (BenchmarkDotNet) compares VeloORM vs Dapper vs EF Core on select; compiles, run manually against a DB (`dotnet run -c Release`). ✅
 - [x] **Phase 12** — SampleApi demonstrating all three layers. Minimal ASP.NET Core API with code-first auto-migrate on startup; endpoints for interceptor (`GET /products`), runtime (`GET /products/{id}`), fragment (`GET /products/search`), raw SQL (`GET /products/expensive`, `POST /products`), and `GET /health`. Built-in OpenAPI at `/openapi/v1.json`. Verified end-to-end against compose Postgres (all endpoints return correct data). ✅
 - [x] **Phase 13** — NuGet packaging. All 7 shipping projects pack (IsPackable default flipped; tests/sample/benchmarks opt out), README + LICENSE + `.snupkg` symbols included, deterministic build. Generator ships as an analyzer (`BuildOutputTargetFolder=analyzers/dotnet/cs`, no runtime deps). `eng/pack.ps1` + GitHub Actions CI (`.github/workflows/ci.yml`: build/test/pack with Postgres service; publish gated on secret). `dotnet pack VeloORM.slnx` → 7 nupkg + 7 snupkg, exit 0. ✅
+
+---
+
+## High-performance & relational expansion (Priority 1 + 2)
+
+> Goal: **Zero-allocation / Native-AOT-ready** generated path with EF-class ergonomics;
+> no change-tracking. Generated (compile-time) path must be boxing-free and reflection-free;
+> when in doubt the generator emits **nothing** → runtime fallback (correctness principle).
+> Execution: **Phase 14–17 as one block, then stop for review.** Phase 18–21 follow on "continue".
+
+### PRIORITY 1 — high-performance core (active block)
+
+- [ ] **Phase 14** — Multi-targeting + `InterceptsLocation` polyfill. Runtime libs (Core, Runtime, Postgres, Migrations, Scaffold) multi-target **`net8.0;net9.0;net10.0`**; generator stays `netstandard2.0`, CLI stays `net10.0`. Generator-emitted `file`-scoped `System.Runtime.CompilerServices.InterceptsLocationAttribute(int version, string data)` polyfill verified to compile on all three TFMs (BCL does not ship it for the interceptors feature). Build green on net8/9/10.
+- [ ] **Phase 15** — Compile-time LINQ interception of operator chains ⭐. New `SymbolQueryTranslator` (Roslyn) translates statically-known `Set<T>()`-rooted chains — `Where(pred)`, `OrderBy/OrderByDescending/ThenBy/ThenByDescending`, `Skip(n).Take(m)` → `OFFSET/LIMIT`, aggregates `Count/Any(pred)/All(pred)/Sum/Average/Min/Max(sel)` → server-side `SELECT` — into baked SQL + bound-parameter plan + reflection-free materializer. **Zero-boxing parameters:** generated path binds via **`NpgsqlParameter<T>.TypedValue`** (`PostgresParameterBinder`); `SqlParameterBinding<T>`/`ISqlParameterBinding` typed variant added. Any untranslatable node → emit nothing (VELO001). Runtime fallback gains **scalar aggregates** (`Sum/Average/Min/Max`, currently `NotSupportedException`) for correctness; `VeloInterceptorSupport` gains parameterized + aggregate overloads. Generated SQL identical to Core `SqlBuilder` output (cross-layer equivalence test). `[MemoryDiagnoser]` asserts ~0 extra allocation on the generated path.
+- [ ] **Phase 16** — Struct-based connection/transaction wrapper. `VeloTransaction` (**`readonly struct : IAsyncDisposable`**, zero-alloc via `await using`, `CommitAsync/RollbackAsync`, auto-rollback if not committed) + sync **`ref struct`** `VeloTransactionScope`. `ICommandExecutor`/`PostgresCommandExecutor` become transaction-aware (execute on a supplied `NpgsqlTransaction`; else current fresh-connection behavior); `VeloDbContext.BeginTransactionAsync()`. Integration: commit visible / rollback reverts.
+- [ ] **Phase 17** — Bulk update via temp table + bulk ergonomics. `PostgresBulkUpdater`: `CREATE TEMP TABLE … (LIKE main) ON COMMIT DROP` → binary COPY (reuse `PostgresBulkInserter`) → single `UPDATE main SET … FROM tmp WHERE pk = pk`. Transaction-aware. `BulkInsertAsync`/`BulkUpdateAsync` context API. Integration: 10k-row update via temp table, no per-row INSERT. **⏸ Stop for review after this phase.**
+
+### PRIORITY 2 — enterprise relational features (after review, on "continue")
+
+- [ ] **Phase 18** — Many-to-Many relationships. `NavigationKind.ManyToMany` + junction metadata; `NavigationResolver` 3rd pass detects junction (pivot) tables by convention/`[ForeignKey]`; `ExpressionTranslator.ApplyInclude` + `QueryEngine.BuildCollectionPlan` add the junction JOIN in the follow-up query; fluent `HasMany(...).WithMany(...).UsingEntity(...)`.
+- [ ] **Phase 19** — Explicit loading (change-tracking-free). Stateless `db.Entry(entity).Reference(o => o.User).Load()/LoadAsync()` and `.Collection(...).Load()` — no identity map / state, just an on-demand targeted query into the supplied instance using the existing Include follow-up infrastructure.
+- [ ] **Phase 20** — Global query filters (soft delete, model-level). `EntityTypeBuilder<T>.HasQueryFilter(e => !e.IsDeleted)` stored on `EntityModel`; auto-injected as a root `WHERE` in `ExpressionTranslator` (and honored by the generated path); `IgnoreQueryFilters()` escape hatch. No migration impact.
+- [ ] **Phase 21** — Static logging interceptors. `db.LogTo(Console.WriteLine)` — static, zero-alloc logging hook (no new delegate/instance per query) wired into the executor; SQL + parameter masking.
 
 ### Recommended extras (do if practical, else mark "future")
 Connection resiliency/retry · logging/tracing with SQL+param masking · Unit-of-Work
