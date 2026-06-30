@@ -61,6 +61,16 @@ dotnet build VeloORM.slnx
 dotnet test
 ```
 
+## Benchmarks
+
+A BenchmarkDotNet harness comparing VeloORM, Dapper, and EF Core lives in
+`benchmarks/VeloORM.Benchmarks`. With Postgres up:
+
+```bash
+VELO_CONNECTION="Host=localhost;Username=velo;Password=velo_dev_password;Database=veloorm" \
+  dotnet run -c Release --project benchmarks/VeloORM.Benchmarks
+```
+
 ## Requirements
 
 - .NET SDK 8.0+ (build uses the .NET 10 SDK; runtime libraries multi-target

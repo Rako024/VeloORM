@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!-- Benchmarks pin to net8.0 so EF Core 8 / Npgsql.EFCore 8 line up cleanly. -->
+    <TargetFramework>net8.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <IsTrimmable>false</IsTrimmable>
+    <EnableTrimAnalyzer>false</EnableTrimAnalyzer>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" Version="0.14.0" />
+    <PackageReference Include="Dapper" Version="2.1.66" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="8.0.10" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\VeloORM.Core\VeloORM.Core.csproj" />
+    <ProjectReference Include="..\..\src\VeloORM.Runtime\VeloORM.Runtime.csproj" />
+    <ProjectReference Include="..\..\src\VeloORM.Postgres\VeloORM.Postgres.csproj" />
+    <ProjectReference Include="..\..\src\VeloORM.Generator\VeloORM.Generator.csproj"
+                      OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+</Project>

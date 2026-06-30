@@ -1,4 +1,7 @@
 <Solution>
+  <Folder Name="/benchmarks/">
+    <Project Path="benchmarks/VeloORM.Benchmarks/VeloORM.Benchmarks.csproj" />
+  </Folder>
   <Folder Name="/samples/">
     <Project Path="samples/VeloORM.SampleApi/VeloORM.SampleApi.csproj" />
   </Folder>
