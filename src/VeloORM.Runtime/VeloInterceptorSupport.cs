@@ -1,4 +1,5 @@
 using System.Data.Common;
+using VeloORM.Data;
 using VeloORM.Query;
 using VeloORM.Runtime.Materialization;
 using VeloORM.Runtime.Internal;
@@ -70,6 +71,38 @@ public static class VeloInterceptorSupport
         var target = Nullable.GetUnderlyingType(typeof(TResult)) ?? typeof(TResult);
         return (TResult)Convert.ChangeType(raw, target, System.Globalization.CultureInfo.InvariantCulture);
     }
+
+    // ---- compiled-query (parameterized, boxing-free) helpers ----------
+    // The binder adds the lambda's typed parameters via NpgsqlParameter<T>, so value types are never
+    // boxed. SQL is baked at compile time.
+
+    public static List<T> ExecuteListBound<T>(
+        IQueryable<T> source, string sql, Func<DbDataReader, T> materializer, Action<ITypedParameterSink> bind) =>
+        ContextOf(source).Executor.QueryBound(sql, new DelegateMaterializer<T>(materializer), bind);
+
+    public static T ExecuteFirstBound<T>(
+        IQueryable<T> source, string sql, Func<DbDataReader, T> materializer, Action<ITypedParameterSink> bind, bool orDefault)
+    {
+        var rows = ExecuteListBound(source, sql, materializer, bind);
+        if (rows.Count > 0) return rows[0];
+        if (orDefault) return default!;
+        throw new InvalidOperationException("Sequence contains no elements.");
+    }
+
+    public static T ExecuteSingleBound<T>(
+        IQueryable<T> source, string sql, Func<DbDataReader, T> materializer, Action<ITypedParameterSink> bind, bool orDefault)
+    {
+        var rows = ExecuteListBound(source, sql, materializer, bind);
+        if (rows.Count > 1) throw new InvalidOperationException("Sequence contains more than one element.");
+        if (rows.Count == 0) return orDefault ? default! : throw new InvalidOperationException("Sequence contains no elements.");
+        return rows[0];
+    }
+
+    public static int ExecuteCountBound<T>(IQueryable<T> source, string sql, Action<ITypedParameterSink> bind) =>
+        checked((int)ContextOf(source).Executor.ExecuteScalarBound<long>(sql, bind));
+
+    public static bool ExecuteAnyBound<T>(IQueryable<T> source, string sql, Action<ITypedParameterSink> bind) =>
+        ContextOf(source).Executor.ExecuteScalarBound<bool>(sql, bind);
 
     private static VeloDbContext ContextOf<T>(IQueryable<T> source) =>
         source is VeloQueryable<T> q

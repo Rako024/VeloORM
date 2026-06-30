@@ -114,6 +114,70 @@ public sealed class PostgresCommandExecutor : ICommandExecutor
         finally { if (owned) await connection.DisposeAsync().ConfigureAwait(false); }
     }
 
+    // ---- compiled-query (typed, boxing-free) path ----------------------
+
+    public List<T> QueryBound<T>(string sql, IMaterializer<T> materializer, Action<ITypedParameterSink> bindParameters)
+    {
+        using var connection = (NpgsqlConnection)_connectionFactory.CreateConnection();
+        connection.Open();
+        using var command = CreateBoundCommand(connection, sql, bindParameters);
+        using var reader = command.ExecuteReader();
+        var results = new List<T>();
+        while (reader.Read())
+            results.Add(materializer.Read(reader));
+        return results;
+    }
+
+    public TScalar? ExecuteScalarBound<TScalar>(string sql, Action<ITypedParameterSink> bindParameters)
+    {
+        using var connection = (NpgsqlConnection)_connectionFactory.CreateConnection();
+        connection.Open();
+        using var command = CreateBoundCommand(connection, sql, bindParameters);
+        return Coerce<TScalar>(command.ExecuteScalar());
+    }
+
+    private static NpgsqlCommand CreateBoundCommand(NpgsqlConnection connection, string sql, Action<ITypedParameterSink> bindParameters)
+    {
+        var command = connection.CreateCommand();
+        command.CommandText = sql;
+        bindParameters(new TypedParameterSink(command));
+        return command;
+    }
+
+    /// <summary>Adds strongly-typed Npgsql parameters. Non-null, non-enum values use
+    /// <c>NpgsqlParameter&lt;T&gt;</c> (no boxing); enums bind their underlying integral value and nulls
+    /// bind <c>DBNull</c> with the mapped type.</summary>
+    private sealed class TypedParameterSink : ITypedParameterSink
+    {
+        private readonly NpgsqlCommand _command;
+        public TypedParameterSink(NpgsqlCommand command) => _command = command;
+
+        public void Add<T>(T value)
+        {
+            if (value is null)
+            {
+                var p = new NpgsqlParameter { Value = DBNull.Value };
+                var clr = Nullable.GetUnderlyingType(typeof(T)) ?? typeof(T);
+                if (PostgresTypeMapper.GetNpgsqlDbType(clr) is { } dbType)
+                    p.NpgsqlDbType = dbType;
+                _command.Parameters.Add(p);
+                return;
+            }
+
+            if (typeof(T).IsEnum)
+            {
+                var underlying = Enum.GetUnderlyingType(typeof(T));
+                _command.Parameters.Add(new NpgsqlParameter
+                {
+                    Value = Convert.ChangeType(value, underlying, System.Globalization.CultureInfo.InvariantCulture),
+                });
+                return;
+            }
+
+            _command.Parameters.Add(new NpgsqlParameter<T> { TypedValue = value });
+        }
+    }
+
     // ---- connection leasing -------------------------------------------
 
     /// <summary>Returns the connection to use and whether this executor owns (must dispose) it.

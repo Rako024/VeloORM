@@ -56,6 +56,53 @@ public class GeneratorDiagnosticsTests
         return diagnostics;
     }
 
+    private static string RunGeneratorSources(string body)
+    {
+        var source = Preamble + "\npublic static class Caller { public static void Run(MyCtx db) {\n" + body + "\n} }";
+        var locations = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        void Add(System.Reflection.Assembly a) { if (!a.IsDynamic && !string.IsNullOrEmpty(a.Location)) locations.Add(a.Location); }
+        foreach (var a in AppDomain.CurrentDomain.GetAssemblies()) Add(a);
+        Add(typeof(object).Assembly);
+        Add(typeof(System.Linq.Enumerable).Assembly);
+        Add(typeof(System.Linq.Queryable).Assembly);
+        Add(typeof(System.Linq.Expressions.Expression).Assembly);
+        Add(typeof(VeloORM.Runtime.VeloDbContext).Assembly);
+        Add(typeof(VeloORM.Query.SqlParameterBinding).Assembly);
+        var coreDir = System.IO.Path.GetDirectoryName(typeof(object).Assembly.Location)!;
+        foreach (var name in new[] { "netstandard.dll", "System.Runtime.dll", "System.Collections.dll" })
+        {
+            var p = System.IO.Path.Combine(coreDir, name);
+            if (System.IO.File.Exists(p)) locations.Add(p);
+        }
+        var compilation = CSharpCompilation.Create("GenTest",
+            new[] { CSharpSyntaxTree.ParseText(source) },
+            locations.Select(p => (MetadataReference)MetadataReference.CreateFromFile(p)),
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        var driver = CSharpGeneratorDriver.Create(new VeloInterceptorGenerator())
+            .RunGeneratorsAndUpdateCompilation(compilation, out _, out _);
+        return string.Join("\n", driver.GetRunResult().GeneratedTrees.Select(t => t.ToString()));
+    }
+
+    [Fact]
+    public void Parameterized_QueryCompile_Generates_Compiled_Interceptor()
+    {
+        var sources = RunGeneratorSources(
+            "var q = Query.Compile<MyCtx, int, System.Collections.Generic.List<Foo>>((c, x) => c.Set<Foo>().Where(f => f.X > x).ToList());");
+        Assert.Contains("CompiledIntercept_0", sources);
+        Assert.Contains("ExecuteListBound", sources);
+        Assert.Contains("sink.Add<int>(vp0)", sources); // typed, boxing-free binding
+    }
+
+    [Fact]
+    public void Unsupported_QueryCompile_Predicate_Is_Not_Compiled_But_Valid()
+    {
+        // string.Contains is outside the compiled grammar: no interceptor, and no VELO002 (it IS a query).
+        var diagnostics = RunGenerator(
+            "var q = Query.Compile<MyCtx, string, System.Collections.Generic.List<Foo>>((c, s) => c.Set<Foo>().Where(f => f.Id.ToString().Contains(s)).ToList());");
+        Assert.DoesNotContain(diagnostics, d => d.Id == "VELO002");
+    }
+
     [Fact]
     public void Runtime_Fallback_Query_Reports_VELO001()
     {

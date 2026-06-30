@@ -32,4 +32,9 @@ public interface ICommandExecutor
     Task<List<T>> QueryAsync<T>(SqlStatement statement, IMaterializer<T> materializer, DbTransaction? transaction, CancellationToken cancellationToken = default);
     Task<int> ExecuteAsync(SqlStatement statement, DbTransaction? transaction, CancellationToken cancellationToken = default);
     Task<TScalar?> ExecuteScalarAsync<TScalar>(SqlStatement statement, DbTransaction? transaction, CancellationToken cancellationToken = default);
+
+    // Compiled-query path: SQL is baked at compile time and parameters are bound by concrete type via
+    // the sink (no boxing of value types). The binder adds parameters in $1, $2, … order.
+    List<T> QueryBound<T>(string sql, IMaterializer<T> materializer, Action<ITypedParameterSink> bindParameters);
+    TScalar? ExecuteScalarBound<TScalar>(string sql, Action<ITypedParameterSink> bindParameters);
 }
