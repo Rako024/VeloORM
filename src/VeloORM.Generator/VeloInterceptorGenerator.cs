@@ -18,8 +18,13 @@ namespace VeloORM.Generator;
 [Generator(LanguageNames.CSharp)]
 public sealed class VeloInterceptorGenerator : IIncrementalGenerator
 {
-    private static readonly HashSet<string> Terminals =
-        new() { "ToList", "First", "FirstOrDefault", "Single", "SingleOrDefault", "Count", "Any" };
+    // Syntactic candidate terminals. Semantic validation (and whether the whole chain is statically
+    // interceptable) happens in SymbolQueryTranslator.TryTranslate.
+    private static readonly HashSet<string> CandidateTerminals = new()
+    {
+        "ToList", "First", "FirstOrDefault", "Single", "SingleOrDefault",
+        "Count", "Any", "Sum", "Average", "Min", "Max",
+    };
 
     internal static readonly DiagnosticDescriptor RuntimeFallback = new(
         id: "VELO001",
@@ -82,15 +87,11 @@ public sealed class VeloInterceptorGenerator : IIncrementalGenerator
         if (!RootsAtVeloSet(member.Expression, ctx.SemanticModel, ct))
             return null;
 
-        // A directly-interceptable site (Set<T>().<supported 0-arg terminal>()) is optimized — no warning.
-        bool directInterceptable =
-            invocation.ArgumentList.Arguments.Count == 0
-            && Terminals.Contains(member.Name.Identifier.Text)
-            && member.Expression is InvocationExpressionSyntax setInv
-            && ctx.SemanticModel.GetSymbolInfo(setInv, ct).Symbol is IMethodSymbol { Name: "Set" } s
-            && IsVeloContext(s.ContainingType);
-
-        return directInterceptable ? null : invocation.GetLocation();
+        // A statically-interceptable chain is optimized — no warning. Everything else that roots at
+        // Set<T>() (e.g. a Where with a captured value, Select, GroupBy, …) runs via the runtime engine.
+        return SymbolQueryTranslator.TryTranslate(invocation, ctx.SemanticModel, ct) is null
+            ? invocation.GetLocation()
+            : null;
     }
 
     private static bool RootsAtVeloSet(ExpressionSyntax? expression, SemanticModel model, System.Threading.CancellationToken ct)
@@ -135,62 +136,51 @@ public sealed class VeloInterceptorGenerator : IIncrementalGenerator
     }
 
     private static bool IsCandidate(SyntaxNode node) =>
-        node is InvocationExpressionSyntax
-        {
-            Expression: MemberAccessExpressionSyntax member,
-            ArgumentList.Arguments.Count: 0,
-        } && Terminals.Contains(member.Name.Identifier.Text);
+        node is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax member }
+        && CandidateTerminals.Contains(member.Name.Identifier.Text);
 
     private static InterceptInfo? Transform(GeneratorSyntaxContext ctx, System.Threading.CancellationToken ct)
     {
         var invocation = (InvocationExpressionSyntax)ctx.Node;
-        var member = (MemberAccessExpressionSyntax)invocation.Expression;
         var model = ctx.SemanticModel;
 
-        // The terminal must be a 0-arg LINQ operator we recognize.
-        if (model.GetSymbolInfo(invocation, ct).Symbol is not IMethodSymbol terminal)
-            return null;
-        var kind = MapTerminal(terminal.Name);
-        if (kind is null)
-            return null;
-
-        // The receiver must be a direct call to VeloDbContext.Set<T>() — no intervening operators.
-        if (member.Expression is not InvocationExpressionSyntax setCall)
-            return null;
-        if (model.GetSymbolInfo(setCall, ct).Symbol is not IMethodSymbol { Name: "Set" } setMethod)
-            return null;
-        if (!IsVeloContext(setMethod.ContainingType))
-            return null;
-        if (setMethod.TypeArguments.Length != 1 || setMethod.TypeArguments[0] is not INamedTypeSymbol entityType)
-            return null;
-
-        var entity = SymbolModelResolver.Resolve(entityType);
-        if (entity is null)
+        // Translate the whole Set<T>()-rooted chain; null means "not statically interceptable".
+        var plan = SymbolQueryTranslator.TryTranslate(invocation, model, ct);
+        if (plan is null)
             return null;
 
         var location = model.GetInterceptableLocation(invocation, ct);
         if (location is null)
             return null;
 
-        // The source parameter type must match the intercepted method's first parameter, as a
-        // CLOSED type (e.g. IEnumerable<Product>), not the open TSource.
-        var sourceParam = terminal.ReceiverType
-                          ?? terminal.Parameters.FirstOrDefault()?.Type;
+        // The source parameter type must be a CLOSED type (e.g. IQueryable<Product>), not open TSource.
+        if (model.GetSymbolInfo(invocation, ct).Symbol is not IMethodSymbol terminal)
+            return null;
+        // For a reduced extension method (all LINQ operators), ReceiverType is the `this` type and
+        // Parameters are the remaining arguments (e.g. an aggregate selector). Both must appear in the
+        // interceptor signature for it to match. Bail if any type is open (TSource) or unnameable.
+        var sourceParam = terminal.ReceiverType ?? terminal.Parameters.FirstOrDefault()?.Type;
         if (sourceParam is null || sourceParam.TypeKind == TypeKind.TypeParameter)
             return null;
+        var extraParams = terminal.Parameters
+            .Select(p => p.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat))
+            .ToArray();
+        if (terminal.Parameters.Any(p => p.Type.TypeKind == TypeKind.TypeParameter))
+            return null;
 
-        var entityFqn = entityType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-        var sql = BuildSql(entity, kind.Value);
-        var newExpression = kind is TerminalKind.Count or TerminalKind.Any ? null : BuildNewExpression(entity, entityFqn);
+        var newExpression = plan.NeedsMaterializer ? BuildNewExpression(plan.Entity, plan.EntityFqn) : null;
 
         return new InterceptInfo(
             AttributeSyntax: location.GetInterceptsLocationAttributeSyntax(),
-            Kind: kind.Value,
-            ReturnTypeFqn: ReturnType(kind.Value, entityFqn),
+            Kind: plan.Kind,
+            ReturnTypeFqn: ReturnType(plan),
             SourceParamTypeFqn: sourceParam.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
-            EntityFqn: entityFqn,
-            Sql: sql,
-            NewExpression: newExpression);
+            EntityFqn: plan.EntityFqn,
+            Sql: plan.Sql,
+            NewExpression: newExpression,
+            ResultTypeFqn: plan.ResultTypeFqn,
+            SumZeroIfEmpty: plan.SumZeroIfEmpty,
+            ExtraParamTypesOrNull: extraParams);
     }
 
     private static bool IsVeloContext(INamedTypeSymbol? type)
@@ -201,48 +191,14 @@ public sealed class VeloInterceptorGenerator : IIncrementalGenerator
         return false;
     }
 
-    private static TerminalKind? MapTerminal(string name) => name switch
+    private static string ReturnType(ChainPlan plan) => plan.Kind switch
     {
-        "ToList" => TerminalKind.List,
-        "First" => TerminalKind.First,
-        "FirstOrDefault" => TerminalKind.FirstOrDefault,
-        "Single" => TerminalKind.Single,
-        "SingleOrDefault" => TerminalKind.SingleOrDefault,
-        "Count" => TerminalKind.Count,
-        "Any" => TerminalKind.Any,
-        _ => null,
-    };
-
-    private static string ReturnType(TerminalKind kind, string entityFqn) => kind switch
-    {
-        TerminalKind.List => $"global::System.Collections.Generic.List<{entityFqn}>",
+        TerminalKind.List => $"global::System.Collections.Generic.List<{plan.EntityFqn}>",
         TerminalKind.Count => "int",
         TerminalKind.Any => "bool",
-        _ => entityFqn,
+        TerminalKind.Sum or TerminalKind.Average or TerminalKind.Min or TerminalKind.Max => plan.ResultTypeFqn!,
+        _ => plan.EntityFqn, // First / Single
     };
-
-    private static string QuoteName(string? schema, string table) =>
-        string.IsNullOrEmpty(schema) ? Quote(table) : Quote(schema!) + "." + Quote(table);
-
-    private static string Quote(string identifier) => "\\\"" + identifier.Replace("\"", "\"\"") + "\\\"";
-
-    private static string BuildSql(GenEntity entity, TerminalKind kind)
-    {
-        var from = "FROM " + QuoteName(entity.Schema, entity.TableName);
-        switch (kind)
-        {
-            case TerminalKind.Count:
-                return $"SELECT count(*) {from}";
-            case TerminalKind.Any:
-                return $"SELECT EXISTS(SELECT 1 {from})";
-            default:
-                var cols = string.Join(", ", entity.Columns.Select(c => Quote(c.ColumnName)));
-                var sql = $"SELECT {cols} {from}";
-                if (kind is TerminalKind.First or TerminalKind.FirstOrDefault) sql += " LIMIT 1";
-                if (kind is TerminalKind.Single or TerminalKind.SingleOrDefault) sql += " LIMIT 2";
-                return sql;
-        }
-    }
 
     private static string BuildNewExpression(GenEntity entity, string entityFqn)
     {
@@ -287,7 +243,10 @@ public sealed class VeloInterceptorGenerator : IIncrementalGenerator
             var info = infos[i];
             sb.AppendLine();
             sb.AppendLine($"        {info.AttributeSyntax}");
-            sb.AppendLine($"        public static {info.ReturnTypeFqn} Intercept_{i}(this {info.SourceParamTypeFqn} source)");
+            // The interceptor signature must match the intercepted method exactly, so we declare (and
+            // ignore) any extra arguments such as an aggregate's selector — the column is baked into SQL.
+            var extra = string.Concat(info.ExtraParamTypes.Select((t, n) => $", {t} arg{n}"));
+            sb.AppendLine($"        public static {info.ReturnTypeFqn} Intercept_{i}(this {info.SourceParamTypeFqn} source{extra})");
 
             var castSource = $"(global::System.Linq.IQueryable<{info.EntityFqn}>)source";
             var body = info.Kind switch
@@ -299,6 +258,8 @@ public sealed class VeloInterceptorGenerator : IIncrementalGenerator
                 TerminalKind.SingleOrDefault => $"global::VeloORM.Runtime.VeloInterceptorSupport.ExecuteSingle<{info.EntityFqn}>({castSource}, \"{info.Sql}\", NoParams, Materialize_{i}, true)",
                 TerminalKind.Count => $"global::VeloORM.Runtime.VeloInterceptorSupport.ExecuteCount<{info.EntityFqn}>({castSource}, \"{info.Sql}\", NoParams)",
                 TerminalKind.Any => $"global::VeloORM.Runtime.VeloInterceptorSupport.ExecuteAny<{info.EntityFqn}>({castSource}, \"{info.Sql}\", NoParams)",
+                TerminalKind.Sum or TerminalKind.Average or TerminalKind.Min or TerminalKind.Max =>
+                    $"global::VeloORM.Runtime.VeloInterceptorSupport.ExecuteAggregate<{info.EntityFqn}, {info.ReturnTypeFqn}>({castSource}, \"{info.Sql}\", NoParams, {(info.SumZeroIfEmpty ? "true" : "false")})",
                 _ => "default",
             };
             sb.AppendLine($"            => {body};");
@@ -316,7 +277,7 @@ public sealed class VeloInterceptorGenerator : IIncrementalGenerator
     }
 }
 
-internal enum TerminalKind { List, First, FirstOrDefault, Single, SingleOrDefault, Count, Any }
+internal enum TerminalKind { List, First, FirstOrDefault, Single, SingleOrDefault, Count, Any, Sum, Average, Min, Max }
 
 internal sealed record InterceptInfo(
     string AttributeSyntax,
@@ -325,4 +286,10 @@ internal sealed record InterceptInfo(
     string SourceParamTypeFqn,
     string EntityFqn,
     string Sql,
-    string? NewExpression);
+    string? NewExpression,
+    string? ResultTypeFqn = null,
+    bool SumZeroIfEmpty = false,
+    string[]? ExtraParamTypesOrNull = null)
+{
+    public string[] ExtraParamTypes => ExtraParamTypesOrNull ?? System.Array.Empty<string>();
+}

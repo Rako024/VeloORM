@@ -70,6 +70,35 @@ public class GeneratorDiagnosticsTests
         Assert.DoesNotContain(diagnostics, d => d.Id == "VELO001");
     }
 
+    [Theory]
+    [InlineData("_ = db.Set<Foo>().OrderBy(f => f.X).ToList();")]
+    [InlineData("_ = db.Set<Foo>().OrderByDescending(f => f.X).ThenBy(f => f.Id).ToList();")]
+    [InlineData("_ = db.Set<Foo>().OrderBy(f => f.X).Skip(5).Take(10).ToList();")]
+    [InlineData("_ = db.Set<Foo>().Distinct().ToList();")]
+    [InlineData("_ = db.Set<Foo>().OrderBy(f => f.X).First();")]
+    [InlineData("var s = db.Set<Foo>().Sum(f => f.X);")]
+    [InlineData("var m = db.Set<Foo>().Max(f => f.X);")]
+    public void Static_Operator_Chains_Are_Intercepted_No_VELO001(string body)
+    {
+        var diagnostics = RunGenerator(body);
+        Assert.DoesNotContain(diagnostics, d => d.Id == "VELO001");
+    }
+
+    [Theory]
+    // A captured value in a predicate cannot be supplied to a (parameterless) interceptor → runtime.
+    [InlineData("int t = 3; _ = db.Set<Foo>().Where(f => f.X > t).ToList();")]
+    // Non-constant Skip/Take cannot be baked into static SQL → runtime.
+    [InlineData("int n = 2; _ = db.Set<Foo>().Skip(n).Take(5).ToList();")]
+    // A predicate-bearing aggregate carries a closure → runtime.
+    [InlineData("var c = db.Set<Foo>().Count(f => f.X > 0);")]
+    // A nested navigation key selector is not statically translatable here → runtime.
+    [InlineData("var l = db.Set<Foo>().Select(f => f.X).ToList();")]
+    public void Closure_Or_Unsupported_Chains_Fall_To_Runtime_VELO001(string body)
+    {
+        var diagnostics = RunGenerator(body);
+        Assert.Contains(diagnostics, d => d.Id == "VELO001");
+    }
+
     [Fact]
     public void Valid_QueryCompile_Does_Not_Report_VELO002()
     {

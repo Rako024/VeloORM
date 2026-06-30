@@ -99,4 +99,48 @@ public class InterceptorTests : IAsyncLifetime
         // The Where query did go through the engine.
         Assert.True(_db.QueryCompilationCount > 0);
     }
+
+    [Fact]
+    public void Ordered_Paged_ToList_Is_Intercepted()
+    {
+        var before = _db.QueryCompilationCount;
+        // By price: Banana 0.75, Apple 1.50, Cherry 3.00 → Skip(1).Take(2) → Apple, Cherry
+        var names = _db.Set<Product>().OrderBy(p => p.Price).Skip(1).Take(2).ToList()
+            .Select(p => p.Name).ToArray();
+
+        Assert.Equal(new[] { "Apple", "Cherry" }, names);
+        Assert.Equal(before, _db.QueryCompilationCount); // static SQL → no runtime translation
+    }
+
+    [Fact]
+    public void OrderByDescending_First_Is_Intercepted()
+    {
+        var before = _db.QueryCompilationCount;
+        var top = _db.Set<Product>().OrderByDescending(p => p.Price).First();
+
+        Assert.Equal("Cherry", top.Name);
+        Assert.Equal(before, _db.QueryCompilationCount);
+    }
+
+    [Fact]
+    public void Aggregates_Are_Intercepted_With_Correct_Values()
+    {
+        var before = _db.QueryCompilationCount;
+        Assert.Equal(5.25m, _db.Set<Product>().Sum(p => p.Price)); // 1.50 + 0.75 + 3.00
+        Assert.Equal(0.75m, _db.Set<Product>().Min(p => p.Price));
+        Assert.Equal(3.00m, _db.Set<Product>().Max(p => p.Price));
+        Assert.Equal(before, _db.QueryCompilationCount); // all intercepted → zero runtime translation
+    }
+
+    [Fact]
+    public void Intercepted_Ordered_Equals_Runtime_Ordered()
+    {
+        var intercepted = _db.Set<Product>().OrderBy(p => p.Price).ToList().Select(p => p.Name).ToArray();
+        // Where forces the runtime engine; same ordering must yield the same result.
+        var runtime = _db.Set<Product>().Where(p => p.Price >= 0m).OrderBy(p => p.Price).ToList()
+            .Select(p => p.Name).ToArray();
+
+        Assert.Equal(runtime, intercepted);
+        Assert.True(_db.QueryCompilationCount > 0); // the Where path compiled
+    }
 }

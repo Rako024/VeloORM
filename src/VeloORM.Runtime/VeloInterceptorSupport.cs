@@ -50,6 +50,27 @@ public static class VeloInterceptorSupport
         return context.Executor.ExecuteScalar<bool>(new SqlStatement(sql, parameters));
     }
 
+    /// <summary>Executes a scalar aggregate (<c>sum/avg/min/max</c>) and coerces the value to the
+    /// LINQ-declared <typeparamref name="TResult"/>, matching LINQ's empty-sequence semantics:
+    /// <c>Sum</c> over no rows yields 0 (<paramref name="sumZeroIfEmpty"/>); <c>Min/Max/Average</c>
+    /// over no rows return null for a nullable result, otherwise throw.</summary>
+    public static TResult ExecuteAggregate<T, TResult>(
+        IQueryable<T> source, string sql, SqlParameterBinding[] parameters, bool sumZeroIfEmpty)
+    {
+        var context = ContextOf(source);
+        var raw = context.Executor.ExecuteScalar<object>(new SqlStatement(sql, parameters));
+
+        if (raw is null)
+        {
+            if (default(TResult) is null) return default!;       // nullable value type or reference type
+            if (sumZeroIfEmpty) return default!;                 // Sum over empty == 0
+            throw new InvalidOperationException("Sequence contains no elements.");
+        }
+
+        var target = Nullable.GetUnderlyingType(typeof(TResult)) ?? typeof(TResult);
+        return (TResult)Convert.ChangeType(raw, target, System.Globalization.CultureInfo.InvariantCulture);
+    }
+
     private static VeloDbContext ContextOf<T>(IQueryable<T> source) =>
         source is VeloQueryable<T> q
             ? q.Context
