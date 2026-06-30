@@ -28,6 +28,10 @@ public sealed class EntityModel
     public NavigationModel? FindNavigation(string propertyName) =>
         Navigations.FirstOrDefault(n => string.Equals(n.PropertyName, propertyName, StringComparison.Ordinal));
 
+    /// <summary>A model-level filter (e.g. soft delete) auto-applied as a root WHERE by the runtime
+    /// translator unless ignored. Null when none is configured.</summary>
+    public System.Linq.Expressions.LambdaExpression? QueryFilter { get; internal set; }
+
     public Type ClrType { get; }
 
     public string TableName { get; }

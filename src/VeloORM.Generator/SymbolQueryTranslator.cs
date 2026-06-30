@@ -61,6 +61,11 @@ internal static class SymbolQueryTranslator
         return false;
     }
 
+    /// <summary>True if the entity carries <c>[VeloQueryFilter]</c>. Such entities have a model-level
+    /// filter the generator cannot see, so interception must defer to the runtime (which applies it).</summary>
+    public static bool HasQueryFilter(INamedTypeSymbol entityType) =>
+        entityType.GetAttributes().Any(a => a.AttributeClass?.Name == "VeloQueryFilterAttribute");
+
     /// <summary>Translates the chain terminated by <paramref name="terminal"/> to a <see cref="ChainPlan"/>,
     /// or returns <c>null</c> if any part falls outside the statically-interceptable grammar.</summary>
     public static ChainPlan? TryTranslate(InvocationExpressionSyntax terminal, SemanticModel model, CancellationToken ct)
@@ -79,6 +84,8 @@ internal static class SymbolQueryTranslator
             return null;
         if (setMethod.TypeArguments.Length != 1 || setMethod.TypeArguments[0] is not INamedTypeSymbol entityType)
             return null;
+        if (HasQueryFilter(entityType))
+            return null; // defer to the runtime, which applies the model-level filter
 
         var entity = SymbolModelResolver.Resolve(entityType);
         if (entity is null)

@@ -52,7 +52,10 @@ public sealed class EntityModelFactory
 
         var indexes = BuildIndexes(clrType, tableName, columns, fluent);
 
-        return new EntityModel(clrType, tableName, schema, columns, indexes);
+        return new EntityModel(clrType, tableName, schema, columns, indexes)
+        {
+            QueryFilter = fluent?.QueryFilter,
+        };
     }
 
     private ColumnModel BuildColumn(

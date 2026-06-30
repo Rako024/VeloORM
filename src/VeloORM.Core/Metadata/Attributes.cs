@@ -38,6 +38,16 @@ public sealed class KeyAttribute : Attribute
 public sealed class NotMappedAttribute : Attribute;
 
 /// <summary>
+/// Marks an entity that has a model-level query filter (configured via
+/// <c>EntityTypeBuilder.HasQueryFilter</c>). This compile-time-visible marker tells the source
+/// generator to leave queries on this entity to the runtime engine (which applies the filter) instead
+/// of intercepting them with baked SQL that cannot see the filter. Required for filter correctness on
+/// the interceptor path; ignored by the runtime.
+/// </summary>
+[AttributeUsage(AttributeTargets.Class, AllowMultiple = false)]
+public sealed class VeloQueryFilterAttribute : Attribute;
+
+/// <summary>
 /// Names the foreign-key property for a navigation. Applied to a navigation property, the name is the
 /// scalar FK property on the dependent entity (e.g. <c>[ForeignKey("CustomerId")]</c> on
 /// <c>Order.Customer</c>, or on <c>Customer.Orders</c> naming <c>Order.CustomerId</c>).

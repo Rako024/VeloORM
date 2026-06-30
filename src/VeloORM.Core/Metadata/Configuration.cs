@@ -23,6 +23,10 @@ public sealed class EntityConfiguration
     public Dictionary<string, PropertyConfiguration> Properties { get; } = new(StringComparer.Ordinal);
     public List<IndexConfiguration> Indexes { get; } = new();
 
+    /// <summary>A model-level filter (e.g. soft delete) auto-applied as a root WHERE on every runtime
+    /// query for this entity, unless <c>IgnoreQueryFilters()</c> is used.</summary>
+    public LambdaExpression? QueryFilter { get; set; }
+
     public EntityConfiguration(Type clrType) => ClrType = clrType;
 
     public PropertyConfiguration PropertyFor(string name)
@@ -84,6 +88,15 @@ public sealed class EntityTypeBuilder<TEntity> where TEntity : class
     {
         var name = ExpressionHelpers.GetSinglePropertyName(propertyExpression);
         return new PropertyBuilder<TProp>(_cfg.PropertyFor(name));
+    }
+
+    /// <summary>Sets a model-level query filter (e.g. <c>e =&gt; !e.IsDeleted</c>) auto-applied to every
+    /// runtime query on this entity. Add <c>[VeloQueryFilter]</c> to the entity so the compile-time
+    /// interceptor defers to the runtime (which applies the filter).</summary>
+    public EntityTypeBuilder<TEntity> HasQueryFilter(Expression<Func<TEntity, bool>> filter)
+    {
+        _cfg.QueryFilter = filter;
+        return this;
     }
 
     public EntityTypeBuilder<TEntity> Ignore<TProp>(Expression<Func<TEntity, TProp>> propertyExpression)

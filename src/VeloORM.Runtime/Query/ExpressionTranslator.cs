@@ -35,9 +35,12 @@ internal sealed class ExpressionTranslator
 
     public ExpressionTranslator(VeloModel model) => _model = model;
 
+    private bool _ignoreFilters;
+
     public TranslationResult Translate(Expression expression)
     {
         VisitChain(expression);
+        ApplyQueryFilter();
         BuildFinalSelect();
 
         var key = ShapeKey.Compute(_query, _projection!);
@@ -125,6 +128,9 @@ internal sealed class ExpressionTranslator
                 break;
             case "Distinct":
                 _query.Distinct = true;
+                break;
+            case "IgnoreQueryFilters":
+                _ignoreFilters = true;
                 break;
             case "Include":
                 ApplyInclude(GetLambda(call.Arguments[1]));
@@ -221,6 +227,15 @@ internal sealed class ExpressionTranslator
 
     private void AndWhere(SqlExpression predicate) =>
         _query.Where = _query.Where is null ? predicate : new SqlBinary(_query.Where, SqlBinaryOperator.And, predicate);
+
+    /// <summary>Applies the root entity's model-level query filter (e.g. soft delete) as an additional
+    /// root WHERE, unless the chain contained <c>IgnoreQueryFilters()</c>.</summary>
+    private void ApplyQueryFilter()
+    {
+        if (_ignoreFilters || _rootEntity.QueryFilter is not { } filter)
+            return;
+        AndWhere(TranslateRootLambda(filter));
+    }
 
     private SqlExpression TranslateRootLambda(LambdaExpression lambda)
     {

@@ -12,8 +12,10 @@ public class GeneratorDiagnosticsTests
         using System.Linq;
         using System.Collections.Generic;
         using VeloORM.Runtime;
+        using VeloORM.Metadata;
 
         public class Foo { public int Id { get; set; } public int X { get; set; } }
+        [VeloQueryFilter] public class Filtered { public int Id { get; set; } public bool IsDeleted { get; set; } }
         public class MyCtx : VeloDbContext
         {
             public MyCtx() : base(null!, null!, null!, null!) { }
@@ -143,6 +145,15 @@ public class GeneratorDiagnosticsTests
     public void Closure_Or_Unsupported_Chains_Fall_To_Runtime_VELO001(string body)
     {
         var diagnostics = RunGenerator(body);
+        Assert.Contains(diagnostics, d => d.Id == "VELO001");
+    }
+
+    [Fact]
+    public void QueryFiltered_Entity_Is_Not_Intercepted_And_Defers_To_Runtime()
+    {
+        // A [VeloQueryFilter] entity must not be intercepted (the interceptor cannot see the filter);
+        // it falls back to the runtime engine, which applies it — hence VELO001.
+        var diagnostics = RunGenerator("_ = db.Set<Filtered>().ToList();");
         Assert.Contains(diagnostics, d => d.Id == "VELO001");
     }
 
