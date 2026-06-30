@@ -27,6 +27,10 @@ internal sealed class ExpressionTranslator
     private readonly List<ReferenceInclude> _referenceIncludes = new();
     private readonly List<CollectionInclude> _collectionIncludes = new();
 
+    // What the next ThenInclude chains onto (set by Include/ThenInclude). Exactly one of RefNode /
+    // CollNode is non-null; null means a ThenInclude here is unsupported and must bail.
+    private (EntityModel Entity, ReferenceInclude? RefNode, CollectionInclude? CollNode)? _includeChain;
+
     private ProjectionPlan? _projection;
 
     public ExpressionTranslator(VeloModel model) => _model = model;
@@ -38,7 +42,7 @@ internal sealed class ExpressionTranslator
 
         var key = ShapeKey.Compute(_query, _projection!);
         if (_collectionIncludes.Count > 0)
-            key += "|CI:" + string.Join(",", _collectionIncludes.Select(c => c.Navigation.PropertyName));
+            key += "|CI:" + string.Join(",", _collectionIncludes.Select(DescribeCollectionInclude));
 
         return new TranslationResult
         {
@@ -53,6 +57,14 @@ internal sealed class ExpressionTranslator
     }
 
     private string NewAlias() => "t" + _aliasCounter++;
+
+    /// <summary>Shape-key fragment for a collection include and its nested ThenInclude structure.</summary>
+    private static string DescribeCollectionInclude(CollectionInclude c)
+    {
+        var refs = c.ChildReferences.Count == 0 ? "" : "[r:" + string.Join("+", c.ChildReferences.Select(n => n.PropertyName)) + "]";
+        var colls = c.ChildCollections.Count == 0 ? "" : "[c:" + string.Join("+", c.ChildCollections.Select(DescribeCollectionInclude)) + "]";
+        return c.Navigation.PropertyName + refs + colls;
+    }
 
     // ---- operator chain -------------------------------------------------
 
@@ -116,6 +128,9 @@ internal sealed class ExpressionTranslator
                 break;
             case "Include":
                 ApplyInclude(GetLambda(call.Arguments[1]));
+                break;
+            case "ThenInclude":
+                ApplyThenInclude(GetLambda(call.Arguments[1]));
                 break;
             case "Join":
                 ApplyJoin(call);
@@ -181,14 +196,76 @@ internal sealed class ExpressionTranslator
         if (nav.Kind == NavigationKind.Reference)
         {
             var (alias, target) = EnsureReferenceJoin(sourceAlias, sourceEntity, nav);
-            if (_referenceIncludes.All(r => r.AliasPrefix != alias))
-                _referenceIncludes.Add(new ReferenceInclude { Navigation = nav, Target = target, AliasPrefix = alias });
+            var node = _referenceIncludes.FirstOrDefault(r => r.AliasPrefix == alias);
+            if (node is null)
+            {
+                node = new ReferenceInclude { Navigation = nav, Target = target, AliasPrefix = alias };
+                _referenceIncludes.Add(node);
+            }
+            _includeChain = (target, node, null);
         }
         else
         {
             var target = _model.GetEntity(nav.TargetClrType);
-            if (_collectionIncludes.All(c => c.Navigation.PropertyName != nav.PropertyName))
-                _collectionIncludes.Add(new CollectionInclude { Navigation = nav, Target = target });
+            var node = _collectionIncludes.FirstOrDefault(c => c.Navigation.PropertyName == nav.PropertyName);
+            if (node is null)
+            {
+                node = new CollectionInclude { Navigation = nav, Target = target };
+                _collectionIncludes.Add(node);
+            }
+            _includeChain = (target, null, node);
+        }
+    }
+
+    /// <summary>Extends the most recent <c>Include</c>/<c>ThenInclude</c> by one navigation hop.</summary>
+    private void ApplyThenInclude(LambdaExpression navigationSelector)
+    {
+        if (_includeChain is not { } chain)
+            throw new NotSupportedException("ThenInclude must follow an Include/ThenInclude on a navigation.");
+        if (StripConvert(navigationSelector.Body) is not MemberExpression member || member.Expression is not ParameterExpression)
+            throw new NotSupportedException("ThenInclude expects a direct navigation property selector.");
+
+        var nav = chain.Entity.FindNavigation(member.Member.Name)
+            ?? throw new NotSupportedException(
+                $"'{member.Member.Name}' on '{chain.Entity.ClrType.Name}' is not a navigation.");
+
+        if (chain.RefNode is { } refNode)
+        {
+            // Extending a JOIN-materialized reference graph in the main query.
+            if (nav.Kind != NavigationKind.Reference)
+                throw new NotSupportedException(
+                    "ThenInclude from a reference onto a collection navigation is not supported yet.");
+
+            var (alias, target) = EnsureReferenceJoin(refNode.AliasPrefix, refNode.Target, nav);
+            var child = refNode.Children.FirstOrDefault(c => c.AliasPrefix == alias);
+            if (child is null)
+            {
+                child = new ReferenceInclude { Navigation = nav, Target = target, AliasPrefix = alias };
+                refNode.Children.Add(child);
+            }
+            _includeChain = (target, child, null);
+        }
+        else
+        {
+            // Extending a collection's follow-up query.
+            var collNode = chain.CollNode!;
+            if (nav.Kind == NavigationKind.Reference)
+            {
+                if (collNode.ChildReferences.All(n => n.PropertyName != nav.PropertyName))
+                    collNode.ChildReferences.Add(nav);
+                _includeChain = null; // a deeper hop off a collection-child reference is not supported yet
+            }
+            else
+            {
+                var target = _model.GetEntity(nav.TargetClrType);
+                var child = collNode.ChildCollections.FirstOrDefault(c => c.Navigation.PropertyName == nav.PropertyName);
+                if (child is null)
+                {
+                    child = new CollectionInclude { Navigation = nav, Target = target };
+                    collNode.ChildCollections.Add(child);
+                }
+                _includeChain = (target, null, child);
+            }
         }
     }
 
@@ -279,8 +356,7 @@ internal sealed class ExpressionTranslator
         foreach (var col in _rootEntity.Columns)
             _query.Select.Add(new SelectItem(new SqlColumn(_rootAlias, col.ColumnName, col.ClrType), $"{_rootAlias}_{col.ColumnName}"));
         foreach (var include in _referenceIncludes)
-            foreach (var col in include.Target.Columns)
-                _query.Select.Add(new SelectItem(new SqlColumn(include.AliasPrefix, col.ColumnName, col.ClrType), $"{include.AliasPrefix}_{col.ColumnName}"));
+            EmitIncludeColumns(include);
 
         _projection = new ProjectionPlan
         {
@@ -290,6 +366,16 @@ internal sealed class ExpressionTranslator
             RootAliasPrefix = _rootAlias,
             ReferenceIncludes = _referenceIncludes,
         };
+    }
+
+    /// <summary>Emits prefixed SELECT columns for a reference include and (recursively) its nested
+    /// ThenInclude children.</summary>
+    private void EmitIncludeColumns(ReferenceInclude include)
+    {
+        foreach (var col in include.Target.Columns)
+            _query.Select.Add(new SelectItem(new SqlColumn(include.AliasPrefix, col.ColumnName, col.ClrType), $"{include.AliasPrefix}_{col.ColumnName}"));
+        foreach (var child in include.Children)
+            EmitIncludeColumns(child);
     }
 
     // ---- source / navigation resolution --------------------------------
@@ -571,11 +657,16 @@ internal sealed class ExpressionTranslator
     }
 }
 
-/// <summary>A collection navigation to load by a follow-up query and stitch by foreign key.</summary>
+/// <summary>A collection navigation to load by a follow-up query and stitch by foreign key.
+/// <see cref="ChildReferences"/> are reference navigations on the child entity to LEFT JOIN into the
+/// follow-up query (collection→reference); <see cref="ChildCollections"/> are nested collection
+/// navigations loaded by further follow-up queries (collection→collection).</summary>
 internal sealed class CollectionInclude
 {
     public required NavigationModel Navigation { get; init; }
     public required EntityModel Target { get; init; }
+    public List<NavigationModel> ChildReferences { get; } = new();
+    public List<CollectionInclude> ChildCollections { get; } = new();
 }
 
 /// <summary>The product of translating a LINQ expression for the runtime engine.</summary>

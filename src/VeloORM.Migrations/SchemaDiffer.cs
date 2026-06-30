@@ -8,11 +8,17 @@ public static class SchemaDiffer
     public static List<MigrationOperation> Diff(SchemaModel from, SchemaModel to)
     {
         var operations = new List<MigrationOperation>();
+        // Foreign keys are appended last so every referenced table already exists.
+        var foreignKeyOps = new List<MigrationOperation>();
 
-        // Dropped tables.
-        foreach (var oldTable in from.Tables)
-            if (to.FindTable(oldTable.Schema, oldTable.Name) is null)
-                operations.Add(new DropTableOperation(oldTable.Schema, oldTable.Name));
+        // Dropped tables: drop their foreign keys first so no dependency blocks the table drops
+        // (the drop order across tables is otherwise unconstrained).
+        var droppedTables = from.Tables.Where(t => to.FindTable(t.Schema, t.Name) is null).ToList();
+        foreach (var oldTable in droppedTables)
+            foreach (var fk in oldTable.ForeignKeys)
+                operations.Add(new DropForeignKeyOperation(oldTable.Schema, oldTable.Name, fk.Name));
+        foreach (var oldTable in droppedTables)
+            operations.Add(new DropTableOperation(oldTable.Schema, oldTable.Name));
 
         foreach (var newTable in to.Tables)
         {
@@ -22,13 +28,17 @@ public static class SchemaDiffer
                 operations.Add(new CreateTableOperation(newTable));
                 foreach (var index in newTable.Indexes)
                     operations.Add(new CreateIndexOperation(newTable.Schema, newTable.Name, index));
+                foreach (var fk in newTable.ForeignKeys)
+                    foreignKeyOps.Add(new AddForeignKeyOperation(newTable.Schema, newTable.Name, fk));
                 continue;
             }
 
             DiffColumns(oldTable, newTable, operations);
             DiffIndexes(oldTable, newTable, operations);
+            DiffForeignKeys(oldTable, newTable, operations, foreignKeyOps);
         }
 
+        operations.AddRange(foreignKeyOps);
         return operations;
     }
 
@@ -57,6 +67,17 @@ public static class SchemaDiffer
         foreach (var newIx in newTable.Indexes)
             if (!oldTable.Indexes.Any(i => NameEq(i.Name, newIx.Name)))
                 ops.Add(new CreateIndexOperation(newTable.Schema, newTable.Name, newIx));
+    }
+
+    private static void DiffForeignKeys(SchemaTable oldTable, SchemaTable newTable, List<MigrationOperation> ops, List<MigrationOperation> addOps)
+    {
+        foreach (var oldFk in oldTable.ForeignKeys)
+            if (!newTable.ForeignKeys.Any(f => NameEq(f.Name, oldFk.Name)))
+                ops.Add(new DropForeignKeyOperation(newTable.Schema, newTable.Name, oldFk.Name));
+
+        foreach (var newFk in newTable.ForeignKeys)
+            if (!oldTable.ForeignKeys.Any(f => NameEq(f.Name, newFk.Name)))
+                addOps.Add(new AddForeignKeyOperation(newTable.Schema, newTable.Name, newFk));
     }
 
     private static bool NameEq(string a, string b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);

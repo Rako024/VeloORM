@@ -16,12 +16,14 @@ internal enum ProjectionKind
 }
 
 /// <summary>A reference navigation materialized inline from a join (child columns aliased
-/// <c>{AliasPrefix}_{column}</c>).</summary>
+/// <c>{AliasPrefix}_{column}</c>). <see cref="Children"/> holds nested reference includes
+/// (<c>Include(o =&gt; o.A).ThenInclude(a =&gt; a.B)</c>), each joined and materialized recursively.</summary>
 internal sealed class ReferenceInclude
 {
     public required NavigationModel Navigation { get; init; }
     public required EntityModel Target { get; init; }
     public required string AliasPrefix { get; init; }
+    public List<ReferenceInclude> Children { get; } = new();
 }
 
 /// <summary>Describes how to turn a result row into a CLR instance for the runtime materializer.</summary>

@@ -5,11 +5,20 @@ using VeloORM.Runtime;
 
 namespace VeloORM.Tests.Integration;
 
+[Table("jaddresses")]
+public class JAddress
+{
+    public int Id { get; set; }
+    public string City { get; set; } = "";
+}
+
 [Table("jusers")]
 public class JUser
 {
     public int Id { get; set; }
     public string Name { get; set; } = "";
+    public int? AddressId { get; set; }
+    public JAddress? Address { get; set; }
     public ICollection<JOrder>? Orders { get; set; }
 }
 
@@ -34,18 +43,24 @@ public class JoinIncludeTests : IAsyncLifetime
     {
         var factory = new NpgsqlConnectionFactory(_fixture.ConnectionString);
         var executor = new PostgresCommandExecutor(factory);
-        _db = new VeloDbContext(VeloModel.Build([typeof(JUser), typeof(JOrder)]),
+        _db = new VeloDbContext(VeloModel.Build([typeof(JUser), typeof(JOrder), typeof(JAddress)]),
             PostgresDialect.Instance, factory, executor);
 
         await executor.ExecuteAsync(new SqlStatement("""
             DROP TABLE IF EXISTS jorders CASCADE;
             DROP TABLE IF EXISTS jusers CASCADE;
-            CREATE TABLE jusers (id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY, name text NOT NULL);
+            DROP TABLE IF EXISTS jaddresses CASCADE;
+            CREATE TABLE jaddresses (id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY, city text NOT NULL);
+            CREATE TABLE jusers (
+                id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                name text NOT NULL,
+                address_id integer REFERENCES jaddresses(id));
             CREATE TABLE jorders (
                 id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
                 total numeric NOT NULL,
                 user_id integer NOT NULL REFERENCES jusers(id));
-            INSERT INTO jusers (name) VALUES ('Alice'), ('Bob');
+            INSERT INTO jaddresses (city) VALUES ('NYC'), ('LA');
+            INSERT INTO jusers (name, address_id) VALUES ('Alice', 1), ('Bob', 2);
             INSERT INTO jorders (total, user_id) VALUES (10, 1), (20, 1), (5, 2);
             """, Array.Empty<SqlParameterBinding>()));
     }
@@ -100,6 +115,40 @@ public class JoinIncludeTests : IAsyncLifetime
         Assert.Equal(2, alice.Orders!.Count);
         Assert.Equal(30m, alice.Orders!.Sum(o => o.Total));
         Assert.Single(bob.Orders!);
+    }
+
+    [Fact]
+    public void ThenInclude_Reference_To_Reference_Populates_Two_Levels()
+    {
+        var orders = _db.Set<JOrder>()
+            .Include(o => o.User)
+            .ThenInclude(u => u!.Address)
+            .ToList();
+
+        Assert.Equal(3, orders.Count);
+        Assert.All(orders, o => Assert.NotNull(o.User));
+        Assert.All(orders, o => Assert.NotNull(o.User!.Address));
+        Assert.Equal("NYC", orders.First(o => o.UserId == 1).User!.Address!.City);
+        Assert.Equal("LA", orders.First(o => o.UserId == 2).User!.Address!.City);
+
+        // Warm cache: re-running the same shape does not recompile.
+        var before = _db.QueryCompilationCount;
+        _ = _db.Set<JOrder>().Include(o => o.User).ThenInclude(u => u!.Address).ToList();
+        Assert.Equal(before, _db.QueryCompilationCount);
+    }
+
+    [Fact]
+    public void ThenInclude_Collection_To_Reference_Populates_Child_References()
+    {
+        var users = _db.Set<JUser>()
+            .Include(u => u.Orders)
+            .ThenInclude(o => o.User)
+            .ToList();
+
+        var alice = users.Single(u => u.Name == "Alice");
+        Assert.Equal(2, alice.Orders!.Count);
+        Assert.All(alice.Orders!, o => Assert.NotNull(o.User));
+        Assert.All(alice.Orders!, o => Assert.Equal("Alice", o.User!.Name));
     }
 
     [Fact]

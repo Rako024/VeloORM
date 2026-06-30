@@ -24,6 +24,7 @@ public sealed class PostgresSchemaReader
             var columns = ReadColumns(connection, schema, name);
             var pk = ReadPrimaryKey(connection, schema, name);
             var indexes = ReadIndexes(connection, schema, name);
+            var foreignKeys = ReadForeignKeys(connection, schema, name);
             tables.Add(new SchemaTable
             {
                 Name = name,
@@ -31,6 +32,7 @@ public sealed class PostgresSchemaReader
                 Columns = columns,
                 PrimaryKey = pk,
                 Indexes = indexes,
+                ForeignKeys = foreignKeys,
             });
         }
         return new SchemaModel { Tables = tables };
@@ -116,6 +118,45 @@ public sealed class PostgresSchemaReader
             });
         }
         return indexes;
+    }
+
+    private static List<SchemaForeignKey> ReadForeignKeys(DbConnection conn, string schema, string table)
+    {
+        // One row per FK column; group by constraint name to preserve composite-key column order.
+        var sql = $"""
+            SELECT tc.constraint_name, kcu.column_name, kcu.ordinal_position,
+                   ccu.table_schema AS principal_schema, ccu.table_name AS principal_table, ccu.column_name AS principal_column
+            FROM information_schema.table_constraints tc
+            JOIN information_schema.key_column_usage kcu
+              ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
+            JOIN information_schema.constraint_column_usage ccu
+              ON tc.constraint_name = ccu.constraint_name AND tc.table_schema = ccu.table_schema
+            WHERE tc.constraint_type = 'FOREIGN KEY'
+              AND tc.table_schema = '{schema}' AND tc.table_name = '{table}'
+            ORDER BY tc.constraint_name, kcu.ordinal_position;
+            """;
+
+        var byName = new Dictionary<string, (List<string> Cols, string PrincipalSchema, string PrincipalTable, List<string> PrincipalCols)>();
+        using (var reader = Query(conn, sql))
+        {
+            while (reader.Read())
+            {
+                var name = reader.GetString(0);
+                if (!byName.TryGetValue(name, out var entry))
+                    byName[name] = entry = (new List<string>(), reader.GetString(3), reader.GetString(4), new List<string>());
+                entry.Cols.Add(reader.GetString(1));
+                entry.PrincipalCols.Add(reader.GetString(5));
+            }
+        }
+
+        return byName.Select(kv => new SchemaForeignKey
+        {
+            Name = kv.Key,
+            Columns = kv.Value.Cols,
+            PrincipalSchema = kv.Value.PrincipalSchema,
+            PrincipalTable = kv.Value.PrincipalTable,
+            PrincipalColumns = kv.Value.PrincipalCols,
+        }).ToList();
     }
 
     /// <summary>Extracts the column list from a pg_indexes <c>indexdef</c> (the parenthesized list).</summary>

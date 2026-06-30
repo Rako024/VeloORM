@@ -49,6 +49,20 @@ internal static class RuntimeMaterializerFactory
         return Expression.Lambda<Func<DbDataReader, object>>(body, reader).Compile();
     }
 
+    /// <summary>Boxed (<c>object</c>) materializer for a plan — used by collection-include follow-up
+    /// queries that may themselves be entity graphs (collection→reference ThenInclude).</summary>
+    public static Func<DbDataReader, object> BuildObject(ProjectionPlan plan)
+    {
+        var reader = Expression.Parameter(typeof(DbDataReader), "r");
+        Expression body = plan.Kind switch
+        {
+            ProjectionKind.Entity => BuildEntityInit(plan.Entity!, null, reader),
+            ProjectionKind.EntityGraph => BuildEntityGraph(plan, reader),
+            _ => throw new NotSupportedException($"Projection kind '{plan.Kind}' is not a materializable entity."),
+        };
+        return Expression.Lambda<Func<DbDataReader, object>>(Expression.Convert(body, typeof(object)), reader).Compile();
+    }
+
     /// <summary>Reads a single scalar from column ordinal 0 — used by the raw-SQL API.</summary>
     public static Delegate BuildScalarByOrdinal(Type resultType)
     {
@@ -76,20 +90,29 @@ internal static class RuntimeMaterializerFactory
             bindings.Add(Expression.Bind(col.Property, ReadColumn(reader, Alias(prefix, col.ColumnName), col.Property.PropertyType)));
 
         foreach (var include in plan.ReferenceIncludes!)
-        {
-            var navType = include.Navigation.Property.PropertyType;
-            var childInit = BuildEntityInit(include.Target, include.AliasPrefix, reader);
-            var childValue = childInit.Type == navType ? childInit : Expression.Convert(childInit, navType);
-
-            // LEFT JOIN miss -> the child's key column is NULL -> leave the navigation null.
-            var keyAlias = Alias(include.AliasPrefix, include.Target.KeyColumns[0].ColumnName);
-            var isMissing = Expression.Call(reader, IsDbNullMethod, OrdinalOf(reader, keyAlias));
-            var childOrNull = Expression.Condition(isMissing, Expression.Default(navType), childValue);
-
-            bindings.Add(Expression.Bind(include.Navigation.Property, childOrNull));
-        }
+            bindings.Add(Expression.Bind(include.Navigation.Property, BuildIncludeValue(include, reader)));
 
         return Expression.MemberInit(Expression.New(parent.ClrType), bindings);
+    }
+
+    /// <summary>Materializes one reference include (and its nested ThenInclude children) from prefixed
+    /// columns, yielding null when the LEFT JOIN missed (the child's key column is DBNull).</summary>
+    private static Expression BuildIncludeValue(ReferenceInclude include, ParameterExpression reader)
+    {
+        var navType = include.Navigation.Property.PropertyType;
+
+        var bindings = new List<MemberBinding>(include.Target.Columns.Count + include.Children.Count);
+        foreach (var col in include.Target.Columns)
+            bindings.Add(Expression.Bind(col.Property, ReadColumn(reader, Alias(include.AliasPrefix, col.ColumnName), col.Property.PropertyType)));
+        foreach (var child in include.Children)
+            bindings.Add(Expression.Bind(child.Navigation.Property, BuildIncludeValue(child, reader)));
+
+        var childInit = Expression.MemberInit(Expression.New(include.Target.ClrType), bindings);
+        var childValue = childInit.Type == navType ? (Expression)childInit : Expression.Convert(childInit, navType);
+
+        var keyAlias = Alias(include.AliasPrefix, include.Target.KeyColumns[0].ColumnName);
+        var isMissing = Expression.Call(reader, IsDbNullMethod, OrdinalOf(reader, keyAlias));
+        return Expression.Condition(isMissing, Expression.Default(navType), childValue);
     }
 
     private static Expression BuildConstructor(ProjectionPlan plan, ParameterExpression reader)

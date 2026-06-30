@@ -88,24 +88,77 @@ internal sealed class QueryEngine
         if (includes.Count == 0)
             return Array.Empty<CollectionIncludePlan>();
 
-        var dialect = _context.Dialect;
         var plans = new CollectionIncludePlan[includes.Count];
         for (int i = 0; i < includes.Count; i++)
-        {
-            var target = includes[i].Target;
-            var columns = string.Join(", ", target.Columns.Select(c => dialect.QuoteIdentifier(c.ColumnName)));
-            // SELECT <cols> FROM <target> WHERE <fk> = ANY($1)  — $1 binds the array of parent keys.
-            var sql = $"SELECT {columns} FROM {dialect.QuoteQualifiedName(target.Schema, target.TableName)} " +
-                      $"WHERE {dialect.QuoteIdentifier(includes[i].Navigation.TargetKeyColumnName)} = ANY({dialect.RenderParameter(0)})";
-            plans[i] = new CollectionIncludePlan
-            {
-                Navigation = includes[i].Navigation,
-                Target = target,
-                Sql = sql,
-                Materializer = RuntimeMaterializerFactory.BuildEntityObject(target),
-            };
-        }
+            plans[i] = BuildCollectionPlan(includes[i]);
         return plans;
+    }
+
+    private CollectionIncludePlan BuildCollectionPlan(CollectionInclude include)
+    {
+        var dialect = _context.Dialect;
+        var target = include.Target;
+        // $1 binds the array of parent keys; the child FK column matches the parent key.
+        var fkColumn = include.Navigation.TargetKeyColumnName;
+
+        string sql;
+        Func<DbDataReader, object> materializer;
+
+        if (include.ChildReferences.Count == 0)
+        {
+            var columns = string.Join(", ", target.Columns.Select(c => dialect.QuoteIdentifier(c.ColumnName)));
+            sql = $"SELECT {columns} FROM {dialect.QuoteQualifiedName(target.Schema, target.TableName)} " +
+                  $"WHERE {dialect.QuoteIdentifier(fkColumn)} = ANY({dialect.RenderParameter(0)})";
+            materializer = RuntimeMaterializerFactory.BuildEntityObject(target);
+        }
+        else
+        {
+            // collection→reference: the follow-up query LEFT JOINs each child reference and materializes
+            // an entity graph (columns prefixed by alias so names never collide).
+            const string rootAlias = "ci0";
+            var select = new List<string>();
+            foreach (var col in target.Columns)
+                select.Add($"{dialect.QuoteIdentifier(rootAlias)}.{dialect.QuoteIdentifier(col.ColumnName)} AS {dialect.QuoteIdentifier($"{rootAlias}_{col.ColumnName}")}");
+
+            var joins = new System.Text.StringBuilder();
+            var referenceIncludes = new List<ReferenceInclude>();
+            int aliasN = 1;
+            foreach (var nav in include.ChildReferences)
+            {
+                var refTarget = _context.Model.GetEntity(nav.TargetClrType);
+                var alias = "ci" + aliasN++;
+                foreach (var col in refTarget.Columns)
+                    select.Add($"{dialect.QuoteIdentifier(alias)}.{dialect.QuoteIdentifier(col.ColumnName)} AS {dialect.QuoteIdentifier($"{alias}_{col.ColumnName}")}");
+                joins.Append(" LEFT JOIN ").Append(dialect.QuoteQualifiedName(refTarget.Schema, refTarget.TableName))
+                     .Append(" AS ").Append(dialect.QuoteIdentifier(alias)).Append(" ON ")
+                     .Append(dialect.QuoteIdentifier(rootAlias)).Append('.').Append(dialect.QuoteIdentifier(nav.LocalKeyColumnName))
+                     .Append(" = ")
+                     .Append(dialect.QuoteIdentifier(alias)).Append('.').Append(dialect.QuoteIdentifier(nav.TargetKeyColumnName));
+                referenceIncludes.Add(new ReferenceInclude { Navigation = nav, Target = refTarget, AliasPrefix = alias });
+            }
+
+            sql = $"SELECT {string.Join(", ", select)} FROM {dialect.QuoteQualifiedName(target.Schema, target.TableName)} AS {dialect.QuoteIdentifier(rootAlias)}{joins} " +
+                  $"WHERE {dialect.QuoteIdentifier(rootAlias)}.{dialect.QuoteIdentifier(fkColumn)} = ANY({dialect.RenderParameter(0)})";
+
+            var plan = new ProjectionPlan
+            {
+                Kind = ProjectionKind.EntityGraph,
+                ResultType = target.ClrType,
+                Entity = target,
+                RootAliasPrefix = rootAlias,
+                ReferenceIncludes = referenceIncludes,
+            };
+            materializer = RuntimeMaterializerFactory.BuildObject(plan);
+        }
+
+        return new CollectionIncludePlan
+        {
+            Navigation = include.Navigation,
+            Target = target,
+            Sql = sql,
+            Materializer = materializer,
+            ChildPlans = BuildCollectionPlans(include.ChildCollections),
+        };
     }
 
     // Invoked via reflection (RunMethod) with the closed element type.
@@ -165,6 +218,7 @@ internal sealed class QueryEngine
                     keys.Add(k);
 
             var byForeignKey = new Dictionary<object, IList>();
+            var allChildren = new List<object>();
             if (keys.Count > 0)
             {
                 var keyArray = Array.CreateInstance(parentKeyColumn.ClrType, keys.Count);
@@ -175,6 +229,7 @@ internal sealed class QueryEngine
 
                 foreach (var child in children)
                 {
+                    allChildren.Add(child);
                     if (childFkProperty.GetValue(child) is not { } fk) continue;
                     if (!byForeignKey.TryGetValue(fk, out var list))
                         byForeignKey[fk] = list = (IList)Activator.CreateInstance(listType)!;
@@ -190,6 +245,10 @@ internal sealed class QueryEngine
                     : (IList)Activator.CreateInstance(listType)!;
                 nav.Property.SetValue(parent, list);
             }
+
+            // Nested collection ThenIncludes: the just-loaded children become parents of a further query.
+            if (plan.ChildPlans.Length > 0 && allChildren.Count > 0)
+                ApplyCollectionIncludes(allChildren, plan.Target, plan.ChildPlans);
         }
     }
 
@@ -210,5 +269,6 @@ internal sealed class QueryEngine
         public required EntityModel Target { get; init; }
         public required string Sql { get; init; }
         public required Func<DbDataReader, object> Materializer { get; init; }
+        public CollectionIncludePlan[] ChildPlans { get; init; } = Array.Empty<CollectionIncludePlan>();
     }
 }

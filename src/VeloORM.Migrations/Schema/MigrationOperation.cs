@@ -48,3 +48,19 @@ public sealed class DropIndexOperation(string? schema, string indexName) : Migra
     public string? Schema { get; } = schema;
     public string IndexName { get; } = indexName;
 }
+
+/// <summary>Adds a foreign-key constraint via <c>ALTER TABLE … ADD CONSTRAINT</c> (emitted after all
+/// tables exist, so the referenced table is guaranteed present).</summary>
+public sealed class AddForeignKeyOperation(string? schema, string table, SchemaForeignKey foreignKey) : MigrationOperation
+{
+    public string? Schema { get; } = schema;
+    public string Table { get; } = table;
+    public SchemaForeignKey ForeignKey { get; } = foreignKey;
+}
+
+public sealed class DropForeignKeyOperation(string? schema, string table, string name) : MigrationOperation
+{
+    public string? Schema { get; } = schema;
+    public string Table { get; } = table;
+    public string Name { get; } = name;
+}

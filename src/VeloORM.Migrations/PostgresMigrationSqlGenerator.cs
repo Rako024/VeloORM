@@ -60,6 +60,21 @@ public sealed class PostgresMigrationSqlGenerator
             case DropIndexOperation dropIx:
                 sb.Append("DROP INDEX ").Append(QName(dropIx.Schema, dropIx.IndexName)).Append(';');
                 break;
+            case AddForeignKeyOperation addFk:
+                var fk = addFk.ForeignKey;
+                sb.Append("ALTER TABLE ").Append(QName(addFk.Schema, addFk.Table))
+                  .Append(" ADD CONSTRAINT ").Append(_dialect.QuoteIdentifier(fk.Name))
+                  .Append(" FOREIGN KEY (")
+                  .Append(string.Join(", ", fk.Columns.Select(_dialect.QuoteIdentifier)))
+                  .Append(") REFERENCES ").Append(QName(fk.PrincipalSchema, fk.PrincipalTable))
+                  .Append(" (")
+                  .Append(string.Join(", ", fk.PrincipalColumns.Select(_dialect.QuoteIdentifier)))
+                  .Append(");");
+                break;
+            case DropForeignKeyOperation dropFk:
+                sb.Append("ALTER TABLE ").Append(QName(dropFk.Schema, dropFk.Table))
+                  .Append(" DROP CONSTRAINT ").Append(_dialect.QuoteIdentifier(dropFk.Name)).Append(';');
+                break;
             default:
                 throw new NotSupportedException($"Operation '{op.GetType().Name}' is not supported.");
         }

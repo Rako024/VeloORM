@@ -17,7 +17,18 @@ public sealed class SchemaIndex
     public bool IsUnique { get; init; }
 }
 
-/// <summary>A table: columns, primary key, and secondary indexes.</summary>
+/// <summary>A foreign-key constraint: local columns referencing a principal table's columns. Compared
+/// by <see cref="Name"/> (consistent with how indexes are diffed).</summary>
+public sealed class SchemaForeignKey
+{
+    public required string Name { get; init; }
+    public required IReadOnlyList<string> Columns { get; init; }
+    public required string PrincipalTable { get; init; }
+    public string? PrincipalSchema { get; init; }
+    public required IReadOnlyList<string> PrincipalColumns { get; init; }
+}
+
+/// <summary>A table: columns, primary key, secondary indexes, and foreign keys.</summary>
 public sealed class SchemaTable
 {
     public required string Name { get; init; }
@@ -25,6 +36,7 @@ public sealed class SchemaTable
     public required IReadOnlyList<SchemaColumn> Columns { get; init; }
     public IReadOnlyList<string> PrimaryKey { get; init; } = Array.Empty<string>();
     public IReadOnlyList<SchemaIndex> Indexes { get; init; } = Array.Empty<SchemaIndex>();
+    public IReadOnlyList<SchemaForeignKey> ForeignKeys { get; init; } = Array.Empty<SchemaForeignKey>();
 
     public SchemaColumn? FindColumn(string name) =>
         Columns.FirstOrDefault(c => string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase));

@@ -24,6 +24,22 @@ public class WidgetV2
     public string? Sku { get; set; }
 }
 
+[Table("mcategories")]
+public class MCategory
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = "";
+}
+
+[Table("mproducts")]
+public class MProduct
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = "";
+    public int CategoryId { get; set; }
+    public MCategory? Category { get; set; }
+}
+
 [Collection(PostgresCollection.Name)]
 public class MigrationTests : IAsyncLifetime
 {
@@ -100,6 +116,30 @@ public class MigrationTests : IAsyncLifetime
         Assert.Null(afterRevert.FindColumn("sku"));
         Assert.DoesNotContain(afterRevert.Indexes, i => i.IsUnique);
         Assert.Equal(new[] { m1.Id }, _migrator.GetAppliedMigrations().ToArray());
+    }
+
+    [Fact]
+    public void ForeignKey_Is_Created_And_Reverted()
+    {
+        var model = VeloModel.Build([typeof(MCategory), typeof(MProduct)]);
+        var m = _scaffolder.Create(model, _reader.Read(), "init_fk", "20260201000000");
+        Assert.Contains("ADD CONSTRAINT", m.UpSql);
+        Assert.Contains("FOREIGN KEY", m.UpSql);
+
+        _migrator.Update([m]);
+
+        var products = _reader.Read().FindTable(null, "mproducts")!;
+        var fk = Assert.Single(products.ForeignKeys);
+        Assert.Equal(new[] { "category_id" }, fk.Columns.ToArray());
+        Assert.Equal("mcategories", fk.PrincipalTable);
+        Assert.Equal(new[] { "id" }, fk.PrincipalColumns.ToArray());
+
+        // Re-scaffolding against the live DB now detects no changes (FK already present).
+        Assert.True(_scaffolder.IsEmpty(_scaffolder.Create(model, _reader.Read(), "noop", "20260202000000")));
+
+        _migrator.RevertMigration(m);
+        Assert.Null(_reader.Read().FindTable(null, "mproducts"));
+        Assert.Null(_reader.Read().FindTable(null, "mcategories"));
     }
 
     [Fact]

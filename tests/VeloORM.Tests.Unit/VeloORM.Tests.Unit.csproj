@@ -18,6 +18,7 @@
     <ProjectReference Include="..\..\src\VeloORM.Core\VeloORM.Core.csproj" />
     <ProjectReference Include="..\..\src\VeloORM.Runtime\VeloORM.Runtime.csproj" />
     <ProjectReference Include="..\..\src\VeloORM.Generator\VeloORM.Generator.csproj" />
+    <ProjectReference Include="..\..\src\VeloORM.Migrations\VeloORM.Migrations.csproj" />
   </ItemGroup>
 
   <ItemGroup>
