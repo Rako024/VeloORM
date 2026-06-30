@@ -16,6 +16,11 @@ namespace VeloORM.Data;
 /// </remarks>
 public interface ICommandExecutor
 {
+    /// <summary>Optional sink invoked once per command with the parameterized SQL text. Because values
+    /// are always bound ($N placeholders), the logged text never contains parameter values — masking is
+    /// structural. A single delegate is stored, so logging allocates no per-query objects.</summary>
+    Action<string>? CommandLogger { get; set; }
+
     List<T> Query<T>(SqlStatement statement, IMaterializer<T> materializer);
     int Execute(SqlStatement statement);
     TScalar? ExecuteScalar<TScalar>(SqlStatement statement);

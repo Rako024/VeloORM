@@ -51,6 +51,15 @@ public partial class VeloDbContext : IDbContext
         return new VeloQueryable<TEntity>(new VeloQueryProvider(this));
     }
 
+    /// <summary>Routes every executed command's parameterized SQL to <paramref name="sink"/>
+    /// (e.g. <c>db.LogTo(Console.WriteLine)</c>). One delegate is stored — no per-query allocation —
+    /// and bound values never appear in the text, so logging is injection/leak-safe by construction.</summary>
+    public VeloDbContext LogTo(Action<string> sink)
+    {
+        Executor.CommandLogger = sink ?? throw new ArgumentNullException(nameof(sink));
+        return this;
+    }
+
     public void Dispose()
     {
         (ConnectionFactory as IDisposable)?.Dispose();

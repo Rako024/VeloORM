@@ -20,6 +20,9 @@ public sealed class PostgresCommandExecutor : ICommandExecutor
     public PostgresCommandExecutor(IConnectionFactory connectionFactory) =>
         _connectionFactory = connectionFactory;
 
+    /// <inheritdoc />
+    public Action<string>? CommandLogger { get; set; }
+
     // ---- sync ----------------------------------------------------------
 
     public List<T> Query<T>(SqlStatement statement, IMaterializer<T> materializer) =>
@@ -136,12 +139,22 @@ public sealed class PostgresCommandExecutor : ICommandExecutor
         return Coerce<TScalar>(command.ExecuteScalar());
     }
 
-    private static NpgsqlCommand CreateBoundCommand(NpgsqlConnection connection, string sql, Action<ITypedParameterSink> bindParameters)
+    private NpgsqlCommand CreateBoundCommand(NpgsqlConnection connection, string sql, Action<ITypedParameterSink> bindParameters)
     {
         var command = connection.CreateCommand();
         command.CommandText = sql;
         bindParameters(new TypedParameterSink(command));
+        Log(sql, command.Parameters.Count);
         return command;
+    }
+
+    /// <summary>Emits the parameterized SQL to the logger. Values are bound ($N), so they never appear
+    /// in the text — masking is structural. Only the bound parameter count is appended.</summary>
+    private void Log(string sql, int parameterCount)
+    {
+        var logger = CommandLogger;
+        if (logger is null) return;
+        logger(parameterCount > 0 ? $"{sql} -- {parameterCount} param(s)" : sql);
     }
 
     /// <summary>Adds strongly-typed Npgsql parameters. Non-null, non-enum values use
@@ -207,12 +220,13 @@ public sealed class PostgresCommandExecutor : ICommandExecutor
         return (TScalar)Convert.ChangeType(result, typeof(TScalar), System.Globalization.CultureInfo.InvariantCulture);
     }
 
-    private static NpgsqlCommand CreateCommand(NpgsqlConnection connection, SqlStatement statement, NpgsqlTransaction? transaction)
+    private NpgsqlCommand CreateCommand(NpgsqlConnection connection, SqlStatement statement, NpgsqlTransaction? transaction)
     {
         var command = connection.CreateCommand();
         command.CommandText = statement.Sql;
         if (transaction is not null)
             command.Transaction = transaction;
+        Log(statement.Sql, statement.Parameters.Count);
 
         foreach (var binding in statement.Parameters)
         {
