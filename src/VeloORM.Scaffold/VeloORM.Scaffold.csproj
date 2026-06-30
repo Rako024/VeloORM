@@ -11,6 +11,7 @@
   <ItemGroup>
     <ProjectReference Include="..\VeloORM.Core\VeloORM.Core.csproj" />
     <ProjectReference Include="..\VeloORM.Postgres\VeloORM.Postgres.csproj" />
+    <ProjectReference Include="..\VeloORM.Migrations\VeloORM.Migrations.csproj" />
   </ItemGroup>
 
 </Project>
