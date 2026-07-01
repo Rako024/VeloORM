@@ -116,9 +116,9 @@ meta-package. In that case you must also opt into interceptors yourself:
 
 ```xml
 <ItemGroup>
-  <PackageReference Include="VeloORM.Postgres" Version="0.1.0" />
+  <PackageReference Include="VeloORM.Postgres" Version="0.1.1" />
   <!-- The generator ships as an analyzer. -->
-  <PackageReference Include="VeloORM.Generator" Version="0.1.0" PrivateAssets="all" />
+  <PackageReference Include="VeloORM.Generator" Version="0.1.1" PrivateAssets="all" />
 </ItemGroup>
 
 <PropertyGroup>
@@ -621,8 +621,8 @@ bilərsiniz. Bu halda interceptor-ları özünüz aktivləşdirməlisiniz:
 
 ```xml
 <ItemGroup>
-  <PackageReference Include="VeloORM.Postgres" Version="0.1.0" />
-  <PackageReference Include="VeloORM.Generator" Version="0.1.0" PrivateAssets="all" />
+  <PackageReference Include="VeloORM.Postgres" Version="0.1.1" />
+  <PackageReference Include="VeloORM.Generator" Version="0.1.1" PrivateAssets="all" />
 </ItemGroup>
 
 <PropertyGroup>
