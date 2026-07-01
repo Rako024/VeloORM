@@ -120,6 +120,28 @@ public class RelationalBenchmarks
 
     // ---- reference Include: orders + their user ----
     [Benchmark(Baseline = true)]
+    public int Ado_ReferenceInclude()
+    {
+        using var cmd = _dapper.CreateCommand();
+        cmd.CommandText = """
+            SELECT o.id, o.user_id, o.created_at, u.id, u.name
+            FROM bench_orders o JOIN bench_users u ON o.user_id = u.id
+            """;
+        using var r = cmd.ExecuteReader();
+        int count = 0;
+        while (r.Read())
+        {
+            _ = new BenchOrder
+            {
+                Id = r.GetInt32(0), UserId = r.GetInt32(1), CreatedAt = r.GetFieldValue<DateTimeOffset>(2),
+                User = new BenchUser { Id = r.GetInt32(3), Name = r.GetString(4) },
+            };
+            count++;
+        }
+        return count;
+    }
+
+    [Benchmark]
     public int Dapper_ReferenceInclude()
     {
         const string sql = """
@@ -146,6 +168,41 @@ public class RelationalBenchmarks
             .Include(_velo.Set<BenchOrder>(), o => o.User).ToList().Count;
 
     // ---- multi-level ThenInclude: orders + items + each item's product ----
+    [Benchmark]
+    public int Ado_ThenInclude()
+    {
+        using var cmd = _dapper.CreateCommand();
+        cmd.CommandText = """
+            SELECT o.id, o.user_id, o.created_at,
+                   i.id, i.order_id, i.product_id, i.quantity,
+                   p.id, p.name, p.price
+            FROM bench_orders o
+            JOIN bench_order_items i ON i.order_id = o.id
+            JOIN bench_rel_products p ON p.id = i.product_id
+            """;
+        using var r = cmd.ExecuteReader();
+        var orders = new Dictionary<int, BenchOrder>();
+        while (r.Read())
+        {
+            int oid = r.GetInt32(0);
+            if (!orders.TryGetValue(oid, out var order))
+            {
+                order = new BenchOrder
+                {
+                    Id = oid, UserId = r.GetInt32(1), CreatedAt = r.GetFieldValue<DateTimeOffset>(2),
+                    Items = new List<BenchOrderItem>(),
+                };
+                orders.Add(oid, order);
+            }
+            order.Items!.Add(new BenchOrderItem
+            {
+                Id = r.GetInt32(3), OrderId = r.GetInt32(4), ProductId = r.GetInt32(5), Quantity = r.GetInt32(6),
+                Product = new BenchProduct { Id = r.GetInt32(7), Name = r.GetString(8), Price = r.GetDecimal(9) },
+            });
+        }
+        return orders.Count;
+    }
+
     [Benchmark]
     public int Dapper_ThenInclude()
     {
