@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- ===================================================================
+       VeloORM — meta-package. Ships NO code; it exists only so that a
+       consumer can `dotnet add package VeloORM` and pull in everything
+       needed to build an app: the core abstractions, the runtime engine,
+       the PostgreSQL provider, and the compile-time source generator.
+
+       The `velo` CLI (VeloORM.Cli) is a dotnet tool and is intentionally
+       NOT bundled here; install it separately as a global tool. Migrations
+       and Scaffold are used by that tool and remain standalone packages.
+       =================================================================== -->
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+    <PackageId>VeloORM</PackageId>
+    <Description>VeloORM meta-package: a single reference that pulls in VeloORM.Core, VeloORM.Runtime, VeloORM.Postgres, and the VeloORM.Generator source generator. Install this to build apps; install the `velo` dotnet tool separately for migrations and scaffolding.</Description>
+    <!-- Meta-package: no assembly of our own, only NuGet dependencies. -->
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <IsTrimmable>false</IsTrimmable>
+    <EnableTrimAnalyzer>false</EnableTrimAnalyzer>
+    <!-- No compilable source lives here. -->
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <!-- No lib/ref assemblies is intentional for a meta-package; also skip the empty symbols package. -->
+    <NoWarn>$(NoWarn);NU5128</NoWarn>
+    <IncludeSymbols>false</IncludeSymbols>
+  </PropertyGroup>
+
+  <!-- ProjectReferences pack as NuGet <dependency> entries. Generator flows
+       transitively as an analyzer to the consumer (do NOT mark PrivateAssets). -->
+  <ItemGroup>
+    <ProjectReference Include="..\VeloORM.Core\VeloORM.Core.csproj" />
+    <ProjectReference Include="..\VeloORM.Runtime\VeloORM.Runtime.csproj" />
+    <ProjectReference Include="..\VeloORM.Postgres\VeloORM.Postgres.csproj" />
+    <!-- The generator is a DevelopmentDependency, so a ProjectReference to it would
+         pack with exclude="Build,Analyzers" and the source generator would NOT run in
+         a consumer of the meta-package. PrivateAssets=none / IncludeAssets=all keeps the
+         analyzer assets flowing transitively so compile-time interception works. -->
+    <ProjectReference Include="..\VeloORM.Generator\VeloORM.Generator.csproj"
+                      PrivateAssets="none" IncludeAssets="all" />
+  </ItemGroup>
+
+  <!-- Auto-enable the interceptors namespace in the consuming project so users
+       don't have to add <InterceptorsNamespaces> by hand. NuGet imports
+       build/<PackageId>.props into the referencing project automatically. -->
+  <ItemGroup>
+    <None Include="build\VeloORM.props" Pack="true" PackagePath="build\VeloORM.props" Visible="false" />
+  </ItemGroup>
+
+</Project>

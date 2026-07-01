@@ -51,12 +51,5 @@ jobs:
           name: nuget-packages
           path: artifacts/*.nupkg
 
-  # Publishing is manual / gated on a secret; uncomment and configure to enable.
-  # publish:
-  #   needs: build-test-pack
-  #   if: github.event_name == 'workflow_dispatch'
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/download-artifact@v4
-  #       with: { name: nuget-packages, path: artifacts }
-  #     - run: dotnet nuget push "artifacts/*.nupkg" --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
+  # Publishing to nuget.org lives in a dedicated workflow (publish.yml) that uses
+  # Trusted Publishing (OIDC) — no stored API key. It runs on GitHub Releases.

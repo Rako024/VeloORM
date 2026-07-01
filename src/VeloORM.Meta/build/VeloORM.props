@@ -1,0 +1,11 @@
+<Project>
+
+  <!-- Imported automatically into any project that references the VeloORM
+       meta-package. Registers the namespace that VeloORM's source generator
+       emits its C# interceptors into, so compile-time query interception
+       works without the consumer configuring anything by hand. -->
+  <PropertyGroup>
+    <InterceptorsNamespaces>$(InterceptorsNamespaces);VeloORM.Generated</InterceptorsNamespaces>
+  </PropertyGroup>
+
+</Project>

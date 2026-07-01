@@ -39,8 +39,8 @@
     <Product>VeloORM</Product>
     <Copyright>Copyright (c) VeloORM Contributors</Copyright>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageProjectUrl>https://github.com/veloorm/veloorm</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/veloorm/veloorm</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/Rako024/VeloORM</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/Rako024/VeloORM</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageTags>orm;postgresql;postgres;dapper;sql;source-generator;linq;micro-orm</PackageTags>

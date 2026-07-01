@@ -95,8 +95,24 @@ there is a single SQL-building path.
 
 ## Installation
 
-VeloORM ships as a set of NuGet packages. A typical application references the PostgreSQL provider
-(which pulls in the core and runtime) and the source generator as an analyzer:
+Install the single `VeloORM` meta-package. It pulls in everything an application needs — the core
+abstractions, the runtime engine, the PostgreSQL provider, and the source generator (as an analyzer):
+
+```bash
+dotnet add package VeloORM
+```
+
+The meta-package also registers the `VeloORM.Generated` namespace for C# interceptors automatically,
+so the compile-time interceptor layer works with no extra configuration.
+
+Install the `velo` command-line tool (migrations and scaffolding) separately, as a .NET tool:
+
+```bash
+dotnet tool install --global velo
+```
+
+**Prefer explicit references?** You can reference the underlying packages directly instead of the
+meta-package. In that case you must also opt into interceptors yourself:
 
 ```xml
 <ItemGroup>
@@ -104,19 +120,14 @@ VeloORM ships as a set of NuGet packages. A typical application references the P
   <!-- The generator ships as an analyzer. -->
   <PackageReference Include="VeloORM.Generator" Version="0.1.0" PrivateAssets="all" />
 </ItemGroup>
-```
 
-To enable the compile-time interceptor layer, opt the `VeloORM.Generated` namespace into C#
-interceptors in your project file:
-
-```xml
 <PropertyGroup>
   <InterceptorsNamespaces>$(InterceptorsNamespaces);VeloORM.Generated</InterceptorsNamespaces>
 </PropertyGroup>
 ```
 
-Additional packages: `VeloORM.Core`, `VeloORM.Runtime`, `VeloORM.Migrations`, `VeloORM.Scaffold`,
-and the `velo` command-line tool.
+Individual packages: `VeloORM.Core`, `VeloORM.Runtime`, `VeloORM.Postgres`, `VeloORM.Generator`,
+`VeloORM.Migrations`, `VeloORM.Scaffold`, and the `velo` command-line tool.
 
 ---
 
@@ -589,27 +600,38 @@ SQL-qurma yolu var.
 
 ## Quraşdırma
 
-VeloORM NuGet paketləri dəsti kimi gəlir. Tipik tətbiq PostgreSQL provayderini (Core və Runtime-ı
-gətirir) və generatoru analizator kimi əlavə edir:
+Tək `VeloORM` meta-paketini quraşdırın. O, tətbiqin ehtiyac duyduğu hər şeyi gətirir — core
+abstraksiyaları, runtime mühərriki, PostgreSQL provayderi və source generator (analizator kimi):
+
+```bash
+dotnet add package VeloORM
+```
+
+Meta-paket həmçinin C# interceptor-lar üçün `VeloORM.Generated` namespace-ni avtomatik qeydə alır,
+ona görə compile-time interceptor layı əlavə konfiqurasiya olmadan işləyir.
+
+`velo` komanda-sətri alətini (miqrasiyalar və scaffolding) ayrıca, .NET tool kimi quraşdırın:
+
+```bash
+dotnet tool install --global velo
+```
+
+**Açıq referensləri üstün tutursunuz?** Meta-paket əvəzinə alt paketləri birbaşa referens edə
+bilərsiniz. Bu halda interceptor-ları özünüz aktivləşdirməlisiniz:
 
 ```xml
 <ItemGroup>
   <PackageReference Include="VeloORM.Postgres" Version="0.1.0" />
   <PackageReference Include="VeloORM.Generator" Version="0.1.0" PrivateAssets="all" />
 </ItemGroup>
-```
 
-Compile-time interceptor layını aktivləşdirmək üçün `VeloORM.Generated` namespace-ni C#
-interceptor-larına daxil edin:
-
-```xml
 <PropertyGroup>
   <InterceptorsNamespaces>$(InterceptorsNamespaces);VeloORM.Generated</InterceptorsNamespaces>
 </PropertyGroup>
 ```
 
-Digər paketlər: `VeloORM.Core`, `VeloORM.Runtime`, `VeloORM.Migrations`, `VeloORM.Scaffold` və
-`velo` komanda-sətri aləti.
+Ayrı-ayrı paketlər: `VeloORM.Core`, `VeloORM.Runtime`, `VeloORM.Postgres`, `VeloORM.Generator`,
+`VeloORM.Migrations`, `VeloORM.Scaffold` və `velo` komanda-sətri aləti.
 
 ## Başlanğıc
 

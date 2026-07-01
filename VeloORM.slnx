@@ -9,6 +9,7 @@
     <Project Path="src/VeloORM.Cli/VeloORM.Cli.csproj" />
     <Project Path="src/VeloORM.Core/VeloORM.Core.csproj" />
     <Project Path="src/VeloORM.Generator/VeloORM.Generator.csproj" />
+    <Project Path="src/VeloORM.Meta/VeloORM.csproj" />
     <Project Path="src/VeloORM.Migrations/VeloORM.Migrations.csproj" />
     <Project Path="src/VeloORM.Postgres/VeloORM.Postgres.csproj" />
     <Project Path="src/VeloORM.Runtime/VeloORM.Runtime.csproj" />

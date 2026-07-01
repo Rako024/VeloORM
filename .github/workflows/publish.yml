@@ -1,0 +1,59 @@
+name: Publish to NuGet
+
+# Publishes all VeloORM packages to nuget.org using **Trusted Publishing** (OIDC) —
+# no long-lived API key is stored in the repo. Authentication happens at run time:
+# GitHub Actions mints a short-lived OIDC token, and the NuGet/login action exchanges
+# it for a temporary nuget.org API key. This requires a matching Trusted Publishing
+# policy on nuget.org bound to:
+#   Repository owner : Rako024
+#   Repository       : VeloORM
+#   Workflow file    : publish.yml   <-- this file's name
+#   Environment      : (none)
+#
+# Trigger a publish by creating a GitHub Release (e.g. tag v0.1.0) or running the
+# workflow manually from the Actions tab.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+# id-token: write is MANDATORY for the OIDC token exchange.
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
+
+      - name: Build
+        run: dotnet build VeloORM.slnx -c Release
+
+      - name: Pack
+        run: dotnet pack VeloORM.slnx -c Release --no-build -o artifacts
+
+      # Exchanges the GitHub OIDC token for a short-lived nuget.org API key.
+      # `user` MUST be your nuget.org account/username that owns the Trusted
+      # Publishing policy. Change it if your nuget.org username differs.
+      - name: NuGet login (Trusted Publishing / OIDC)
+        id: nuget-login
+        uses: NuGet/login@v1
+        with:
+          user: Rako024
+
+      - name: Push packages
+        run: >-
+          dotnet nuget push "artifacts/*.nupkg"
+          --api-key ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
+          --source https://api.nuget.org/v3/index.json
+          --skip-duplicate
