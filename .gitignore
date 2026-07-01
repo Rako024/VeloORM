@@ -27,3 +27,11 @@ coverage*.xml
 # OS
 .DS_Store
 Thumbs.db
+
+# AI agent / Claude tooling (local state, never committed)
+.claude/
+CLAUDE.md
+ruvector.db
+*.ruvector
+.mcp.json
+.ruflo/
