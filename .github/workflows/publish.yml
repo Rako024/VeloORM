@@ -14,6 +14,10 @@ name: Publish to NuGet
 # workflow manually from the Actions tab.
 
 on:
+  # Publish when a version tag is pushed (e.g. v0.1.0)...
+  push:
+    tags: ['v*']
+  # ...or when a GitHub Release is published, or manually from the Actions tab.
   release:
     types: [published]
   workflow_dispatch:
