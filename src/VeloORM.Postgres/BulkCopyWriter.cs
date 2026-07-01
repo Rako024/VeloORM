@@ -31,6 +31,13 @@ internal static class BulkCopyWriter
                     writer.Write(Convert.ChangeType(value, underlying, CultureInfo.InvariantCulture), NpgsqlDbType.Integer);
                     continue;
                 }
+                // Relabel DateTime as Unspecified so COPY accepts it into a `timestamp` column
+                // (mirrors PostgresCommandExecutor.BindValue).
+                if (value is DateTime dt)
+                {
+                    writer.Write(dt.Kind == DateTimeKind.Unspecified ? dt : DateTime.SpecifyKind(dt, DateTimeKind.Unspecified), NpgsqlDbType.Timestamp);
+                    continue;
+                }
                 if (PostgresTypeMapper.GetNpgsqlDbType(column.ClrType) is { } dbType)
                     writer.Write(value, dbType);
                 else

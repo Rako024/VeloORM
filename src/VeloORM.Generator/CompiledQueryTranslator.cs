@@ -96,6 +96,8 @@ internal static class CompiledQueryTranslator
             return null;
         if (SymbolQueryTranslator.HasQueryFilter(entityType))
             return null; // defer to the runtime, which applies the model-level filter
+        if (SymbolQueryTranslator.HasUtcDateTime(entityType))
+            return null; // defer to the runtime, which stamps DateTimeKind.Utc on read
 
         var entity = SymbolModelResolver.Resolve(entityType);
         if (entity is null)

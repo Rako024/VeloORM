@@ -66,6 +66,19 @@ internal static class SymbolQueryTranslator
     public static bool HasQueryFilter(INamedTypeSymbol entityType) =>
         entityType.GetAttributes().Any(a => a.AttributeClass?.Name == "VeloQueryFilterAttribute");
 
+    /// <summary>True if the entity has any <c>[UtcDateTime]</c> property. Those columns are stamped
+    /// <c>DateTimeKind.Utc</c> by the runtime materializer; the baked materializer would not, so
+    /// interception must defer to the runtime to keep the read <c>Kind</c> correct.</summary>
+    public static bool HasUtcDateTime(INamedTypeSymbol entityType)
+    {
+        for (INamedTypeSymbol? t = entityType; t is not null; t = t.BaseType)
+            foreach (var member in t.GetMembers())
+                if (member is IPropertySymbol prop &&
+                    prop.GetAttributes().Any(a => a.AttributeClass?.Name == "UtcDateTimeAttribute"))
+                    return true;
+        return false;
+    }
+
     /// <summary>Translates the chain terminated by <paramref name="terminal"/> to a <see cref="ChainPlan"/>,
     /// or returns <c>null</c> if any part falls outside the statically-interceptable grammar.</summary>
     public static ChainPlan? TryTranslate(InvocationExpressionSyntax terminal, SemanticModel model, CancellationToken ct)
@@ -86,6 +99,8 @@ internal static class SymbolQueryTranslator
             return null;
         if (HasQueryFilter(entityType))
             return null; // defer to the runtime, which applies the model-level filter
+        if (HasUtcDateTime(entityType))
+            return null; // defer to the runtime, which stamps DateTimeKind.Utc on read
 
         var entity = SymbolModelResolver.Resolve(entityType);
         if (entity is null)

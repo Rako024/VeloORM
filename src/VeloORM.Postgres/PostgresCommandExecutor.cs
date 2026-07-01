@@ -1,5 +1,6 @@
 using System.Data.Common;
 using Npgsql;
+using NpgsqlTypes;
 using VeloORM.Data;
 using VeloORM.Materialization;
 using VeloORM.Query;
@@ -256,6 +257,16 @@ public sealed class PostgresCommandExecutor : ICommandExecutor
         {
             var underlying = Enum.GetUnderlyingType(value.GetType());
             parameter.Value = Convert.ChangeType(value, underlying, System.Globalization.CultureInfo.InvariantCulture);
+            return;
+        }
+
+        // VeloORM maps DateTime -> `timestamp` (without time zone). Npgsql refuses to write a Kind=Utc
+        // value to that type, so relabel every DateTime as Unspecified (the clock is not shifted). Use
+        // DateTimeOffset for time-zone-aware (`timestamptz`) columns.
+        if (value is DateTime dt)
+        {
+            parameter.Value = dt.Kind == DateTimeKind.Unspecified ? dt : DateTime.SpecifyKind(dt, DateTimeKind.Unspecified);
+            parameter.NpgsqlDbType = NpgsqlDbType.Timestamp;
             return;
         }
 

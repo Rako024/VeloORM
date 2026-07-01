@@ -85,4 +85,31 @@ public class CliTests : IAsyncLifetime
         Assert.True(File.Exists(Path.Combine(outDir, "CliWidget.cs")));
         Assert.Contains("public class CliWidget", File.ReadAllText(Path.Combine(outDir, "CliWidget.cs")));
     }
+
+    [Fact]
+    public async Task Scaffold_Skips_Existing_Files_Unless_Force()
+    {
+        var exec = new PostgresCommandExecutor(_factory);
+        await exec.ExecuteAsync(new SqlStatement(
+            "CREATE TABLE cli_widgets (id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY, title text NOT NULL);",
+            Array.Empty<SqlParameterBinding>()));
+
+        var outDir = Path.Combine(_migrationsDir, "scaffold");
+        var options = new ScaffoldOptions { Namespace = "Gen", ContextName = "GenCtx" };
+
+        // First run writes the files.
+        CliCommands.Scaffold(_factory, options, outDir, new StringWriter());
+        var entityPath = Path.Combine(outDir, "CliWidget.cs");
+        File.WriteAllText(entityPath, "// hand-edited");
+
+        // Without --force, existing files are preserved.
+        var sw = new StringWriter();
+        CliCommands.Scaffold(_factory, options, outDir, sw, force: false);
+        Assert.Equal("// hand-edited", File.ReadAllText(entityPath));
+        Assert.Contains("Skipped existing", sw.ToString());
+
+        // With --force, they are overwritten.
+        CliCommands.Scaffold(_factory, options, outDir, new StringWriter(), force: true);
+        Assert.Contains("public class CliWidget", File.ReadAllText(entityPath));
+    }
 }
