@@ -108,7 +108,7 @@ so the compile-time interceptor layer works with no extra configuration.
 Install the `velo` command-line tool (migrations and scaffolding) separately, as a .NET tool:
 
 ```bash
-dotnet tool install --global velo
+dotnet tool install --global VeloORM.Cli
 ```
 
 **Prefer explicit references?** You can reference the underlying packages directly instead of the
@@ -425,7 +425,7 @@ VeloORM is code-first. The `velo` command-line tool (a .NET tool) manages migrat
 
 ```bash
 # Install the tool
-dotnet tool install --global velo
+dotnet tool install --global VeloORM.Cli
 
 # Create a migration from the current model
 velo add-migration InitialCreate --connection "Host=...;Database=veloorm"
@@ -613,7 +613,7 @@ ona görə compile-time interceptor layı əlavə konfiqurasiya olmadan işləyi
 `velo` komanda-sətri alətini (miqrasiyalar və scaffolding) ayrıca, .NET tool kimi quraşdırın:
 
 ```bash
-dotnet tool install --global velo
+dotnet tool install --global VeloORM.Cli
 ```
 
 **Açıq referensləri üstün tutursunuz?** Meta-paket əvəzinə alt paketləri birbaşa referens edə
@@ -870,7 +870,7 @@ db.LogTo(Console.WriteLine);
 VeloORM code-first-dir. `velo` aləti (bir .NET tool) miqrasiya və scaffolding-i idarə edir.
 
 ```bash
-dotnet tool install --global velo
+dotnet tool install --global VeloORM.Cli
 velo add-migration InitialCreate --connection "Host=...;Database=veloorm"
 velo update-database --connection "Host=...;Database=veloorm"
 velo list-migrations
