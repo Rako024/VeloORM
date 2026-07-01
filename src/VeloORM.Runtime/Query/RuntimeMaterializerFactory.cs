@@ -24,6 +24,9 @@ internal static class RuntimeMaterializerFactory
         typeof(DbDataReader).GetMethods()
             .First(m => m.Name == nameof(DbDataReader.GetFieldValue) && m.IsGenericMethodDefinition);
 
+    private static readonly MethodInfo SpecifyKindMethod =
+        typeof(DateTime).GetMethod(nameof(DateTime.SpecifyKind), [typeof(DateTime), typeof(DateTimeKind)])!;
+
     public static Delegate Build(ProjectionPlan plan)
     {
         var reader = Expression.Parameter(typeof(DbDataReader), "r");
@@ -31,7 +34,7 @@ internal static class RuntimeMaterializerFactory
         {
             ProjectionKind.Entity => BuildEntityInit(plan.Entity!, null, reader),
             ProjectionKind.EntityGraph => BuildEntityGraph(plan, reader),
-            ProjectionKind.Scalar => ReadColumn(reader, plan.ScalarAlias!, plan.ResultType),
+            ProjectionKind.Scalar => ReadColumn(reader, plan.ScalarAlias!, plan.ResultType, restampUtc: false),
             ProjectionKind.Constructor => BuildConstructor(plan, reader),
             _ => throw new NotSupportedException($"Projection kind '{plan.Kind}' is not supported."),
         };
@@ -67,7 +70,7 @@ internal static class RuntimeMaterializerFactory
     public static Delegate BuildScalarByOrdinal(Type resultType)
     {
         var reader = Expression.Parameter(typeof(DbDataReader), "r");
-        var body = ReadValue(reader, Expression.Constant(0), resultType);
+        var body = ReadValue(reader, Expression.Constant(0), resultType, restampUtc: false);
         var funcType = typeof(Func<,>).MakeGenericType(typeof(DbDataReader), resultType);
         return Expression.Lambda(funcType, body, reader).Compile();
     }
@@ -76,7 +79,7 @@ internal static class RuntimeMaterializerFactory
     {
         var bindings = new List<MemberBinding>(entity.Columns.Count);
         foreach (var col in entity.Columns)
-            bindings.Add(Expression.Bind(col.Property, ReadColumn(reader, Alias(aliasPrefix, col.ColumnName), col.Property.PropertyType)));
+            bindings.Add(Expression.Bind(col.Property, ReadColumn(reader, Alias(aliasPrefix, col.ColumnName), col.Property.PropertyType, col.NormalizeToUtc)));
         return Expression.MemberInit(Expression.New(entity.ClrType), bindings);
     }
 
@@ -87,7 +90,7 @@ internal static class RuntimeMaterializerFactory
         var bindings = new List<MemberBinding>(parent.Columns.Count + (plan.ReferenceIncludes?.Count ?? 0));
 
         foreach (var col in parent.Columns)
-            bindings.Add(Expression.Bind(col.Property, ReadColumn(reader, Alias(prefix, col.ColumnName), col.Property.PropertyType)));
+            bindings.Add(Expression.Bind(col.Property, ReadColumn(reader, Alias(prefix, col.ColumnName), col.Property.PropertyType, col.NormalizeToUtc)));
 
         foreach (var include in plan.ReferenceIncludes!)
             bindings.Add(Expression.Bind(include.Navigation.Property, BuildIncludeValue(include, reader)));
@@ -103,7 +106,7 @@ internal static class RuntimeMaterializerFactory
 
         var bindings = new List<MemberBinding>(include.Target.Columns.Count + include.Children.Count);
         foreach (var col in include.Target.Columns)
-            bindings.Add(Expression.Bind(col.Property, ReadColumn(reader, Alias(include.AliasPrefix, col.ColumnName), col.Property.PropertyType)));
+            bindings.Add(Expression.Bind(col.Property, ReadColumn(reader, Alias(include.AliasPrefix, col.ColumnName), col.Property.PropertyType, col.NormalizeToUtc)));
         foreach (var child in include.Children)
             bindings.Add(Expression.Bind(child.Navigation.Property, BuildIncludeValue(child, reader)));
 
@@ -121,7 +124,7 @@ internal static class RuntimeMaterializerFactory
         var args = plan.ConstructorArgs!;
         var argExprs = new Expression[args.Count];
         for (int i = 0; i < args.Count; i++)
-            argExprs[i] = ReadColumn(reader, args[i].Alias, args[i].Type);
+            argExprs[i] = ReadColumn(reader, args[i].Alias, args[i].Type, restampUtc: false);
         return Expression.New(ctor, argExprs);
     }
 
@@ -130,14 +133,14 @@ internal static class RuntimeMaterializerFactory
     private static Expression OrdinalOf(ParameterExpression reader, string alias) =>
         Expression.Call(reader, GetOrdinalMethod, Expression.Constant(alias));
 
-    private static Expression ReadColumn(ParameterExpression reader, string alias, Type targetType)
+    private static Expression ReadColumn(ParameterExpression reader, string alias, Type targetType, bool restampUtc)
     {
         var ord = Expression.Variable(typeof(int), "ord");
         var assignOrd = Expression.Assign(ord, OrdinalOf(reader, alias));
-        return Expression.Block(targetType, [ord], assignOrd, ReadValue(reader, ord, targetType));
+        return Expression.Block(targetType, [ord], assignOrd, ReadValue(reader, ord, targetType, restampUtc));
     }
 
-    private static Expression ReadValue(ParameterExpression reader, Expression ord, Type targetType)
+    private static Expression ReadValue(ParameterExpression reader, Expression ord, Type targetType, bool restampUtc)
     {
         var underlying = Nullable.GetUnderlyingType(targetType);
         bool isNullableValue = underlying is not null;
@@ -153,7 +156,10 @@ internal static class RuntimeMaterializerFactory
         }
         else
         {
-            var rawRead = Expression.Call(reader, GetFieldValueOpenMethod.MakeGenericMethod(nonNullType), ord);
+            Expression rawRead = Expression.Call(reader, GetFieldValueOpenMethod.MakeGenericMethod(nonNullType), ord);
+            // Stamp UTC-mapped DateTime columns as Kind=Utc (timestamp reads come back Unspecified).
+            if (restampUtc && nonNullType == typeof(DateTime))
+                rawRead = Expression.Call(SpecifyKindMethod, rawRead, Expression.Constant(DateTimeKind.Utc));
             valueExpr = nonNullType == targetType ? rawRead : Expression.Convert(rawRead, targetType);
         }
 

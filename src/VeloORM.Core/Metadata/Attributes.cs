@@ -61,6 +61,16 @@ public sealed class ForeignKeyAttribute : Attribute
     public string Name { get; }
 }
 
+/// <summary>
+/// Marks a <see cref="DateTime"/> property as UTC. On read, materialized values are stamped
+/// <see cref="DateTimeKind.Utc"/>, so round-tripped timestamps carry the right kind. (Writes of any
+/// <see cref="DateTime"/> are always stored as <see cref="DateTimeKind.Unspecified"/> to match the
+/// PostgreSQL <c>timestamp</c> column type, regardless of this attribute — that is what prevents the
+/// common "Cannot write DateTime with Kind=Utc to timestamp without time zone" error.)
+/// </summary>
+[AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
+public sealed class UtcDateTimeAttribute : Attribute;
+
 /// <summary>How a column's value is produced by the store.</summary>
 public enum StoreGenerated
 {

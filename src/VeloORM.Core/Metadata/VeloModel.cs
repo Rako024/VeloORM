@@ -3,6 +3,16 @@ using System.Diagnostics.CodeAnalysis;
 
 namespace VeloORM.Metadata;
 
+/// <summary>Model-wide build options.</summary>
+public sealed class VeloModelOptions
+{
+    /// <summary>When true, every mapped <see cref="DateTime"/> column is treated as UTC — read values
+    /// are stamped <see cref="DateTimeKind.Utc"/>, as if each property carried
+    /// <see cref="UtcDateTimeAttribute"/>. Writes of any <see cref="DateTime"/> are stored as
+    /// <see cref="DateTimeKind.Unspecified"/> regardless (matching the <c>timestamp</c> column type).</summary>
+    public bool NormalizeDateTimesToUtc { get; set; }
+}
+
 /// <summary>
 /// The resolved metadata for a whole context: a thread-safe registry of
 /// <see cref="EntityModel"/>s keyed by CLR type. Built once and reused.
@@ -34,12 +44,13 @@ public sealed class VeloModel
     public static VeloModel Build(
         IEnumerable<Type> entityTypes,
         Action<ModelBuilder>? configure = null,
-        INamingConvention? naming = null)
+        INamingConvention? naming = null,
+        VeloModelOptions? options = null)
     {
         var modelBuilder = new ModelBuilder();
         configure?.Invoke(modelBuilder);
 
-        var factory = new EntityModelFactory(naming);
+        var factory = new EntityModelFactory(naming, options);
         var models = new List<EntityModel>();
 
         // Include explicitly-configured types even if not in the supplied set.

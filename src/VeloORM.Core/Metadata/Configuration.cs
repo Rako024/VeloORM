@@ -11,6 +11,10 @@ public sealed class PropertyConfiguration
     public bool? IsRequired { get; set; }
     public StoreGenerated? StoreGenerated { get; set; }
     public bool Ignored { get; set; }
+
+    /// <summary>Stamp materialized <see cref="DateTime"/> values as UTC on read (see
+    /// <c>AsUtc()</c> / <see cref="UtcDateTimeAttribute"/>).</summary>
+    public bool NormalizeToUtc { get; set; }
 }
 
 /// <summary>Mutable fluent overrides for one entity type.</summary>
@@ -165,6 +169,10 @@ public sealed class PropertyBuilder<TProp>
     public PropertyBuilder<TProp> ValueGeneratedOnAdd() { _cfg.StoreGenerated = Metadata.StoreGenerated.OnAdd; return this; }
     public PropertyBuilder<TProp> ValueGeneratedOnAddOrUpdate() { _cfg.StoreGenerated = Metadata.StoreGenerated.OnAddOrUpdate; return this; }
     public PropertyBuilder<TProp> ValueGeneratedNever() { _cfg.StoreGenerated = Metadata.StoreGenerated.Never; return this; }
+
+    /// <summary>Treats this <see cref="DateTime"/> property as UTC: read values are stamped
+    /// <see cref="DateTimeKind.Utc"/>. Equivalent to <see cref="UtcDateTimeAttribute"/>.</summary>
+    public PropertyBuilder<TProp> AsUtc() { _cfg.NormalizeToUtc = true; return this; }
 }
 
 /// <summary>Helpers to pull property names out of LINQ member-access lambdas.</summary>

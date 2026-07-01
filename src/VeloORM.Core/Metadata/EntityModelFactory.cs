@@ -10,9 +10,13 @@ namespace VeloORM.Metadata;
 public sealed class EntityModelFactory
 {
     private readonly INamingConvention _naming;
+    private readonly bool _normalizeDateTimesToUtc;
 
-    public EntityModelFactory(INamingConvention? naming = null) =>
+    public EntityModelFactory(INamingConvention? naming = null, VeloModelOptions? options = null)
+    {
         _naming = naming ?? SnakeCaseNamingConvention.Instance;
+        _normalizeDateTimesToUtc = options?.NormalizeDateTimesToUtc ?? false;
+    }
 
     public EntityModel Create(
         [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] Type clrType,
@@ -100,7 +104,13 @@ public sealed class EntityModelFactory
         if (isKey)
             isNullable = false;
 
-        return new ColumnModel(property, columnName, underlying, isNullable, isKey, keyOrder, generated, storeType);
+        bool normalizeToUtc =
+            underlying == typeof(DateTime)
+            && (propCfg?.NormalizeToUtc == true
+                || property.GetCustomAttribute<UtcDateTimeAttribute>() is not null
+                || _normalizeDateTimesToUtc);
+
+        return new ColumnModel(property, columnName, underlying, isNullable, isKey, keyOrder, generated, storeType, normalizeToUtc);
     }
 
     private static StoreGenerated DefaultStoreGenerated(bool isKey, Type underlying) =>

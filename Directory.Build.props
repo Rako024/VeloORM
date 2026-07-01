@@ -47,7 +47,7 @@
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
-    <VersionPrefix>0.1.1</VersionPrefix>
+    <VersionPrefix>0.1.3</VersionPrefix>
     <!-- Shipping libraries pack by default; tests/sample/benchmarks opt out via IsPackable=false. -->
     <IsPackable>true</IsPackable>
   </PropertyGroup>

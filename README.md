@@ -427,18 +427,47 @@ VeloORM is code-first. The `velo` command-line tool (a .NET tool) manages migrat
 # Install the tool
 dotnet tool install --global VeloORM.Cli
 
-# Create a migration from the current model
-velo add-migration InitialCreate --connection "Host=...;Database=veloorm"
+# Point it at your project — velo builds it and loads the model for you.
+# Works with class libraries AND ASP.NET Core (Microsoft.NET.Sdk.Web) projects;
+# entities do not need to live in a separate library.
+velo add-migration InitialCreate --project ./src/MyApp/MyApp.csproj
 
 # Apply pending migrations
-velo update-database --connection "Host=...;Database=veloorm"
+velo update-database --project ./src/MyApp/MyApp.csproj
 
 # List and revert
-velo list-migrations
-velo revert
+velo list-migrations --project ./src/MyApp/MyApp.csproj
+velo revert --project ./src/MyApp/MyApp.csproj
 ```
 
-The connection string can also be supplied through the `VELO_CONNECTION` environment variable.
+Run `velo help <command>` for detailed help and examples of any command.
+
+**Targeting the project.** Prefer `--project <csproj>` — `velo` runs `dotnet build` and locates the
+output assembly itself (add `--no-build` to skip the build, `--configuration Release` to change config).
+You can still pass a pre-built assembly with `--assembly <dll>`. Framework-dependent dependencies
+(including `Microsoft.AspNetCore.*`) are resolved via the project's `.deps.json`/`.runtimeconfig.json`,
+so Web SDK projects load directly.
+
+**Context discovery.** For `add-migration`, `velo` finds your context in this order:
+
+1. A type implementing `IVeloDesignTimeDbContextFactory<TContext>` (it supplies its own connection —
+   use this when your context is created through DI and has no simple constructor).
+2. A `VeloDbContext` with a public `(string connectionString)` constructor.
+3. A `VeloDbContext` with a public parameterless constructor.
+
+When more than one context exists, select it with `--context <TypeName>`.
+
+**Connection string resolution** (highest precedence first):
+
+1. `--connection` / `-c`
+2. the `VELO_CONNECTION` environment variable
+3. a design-time factory's own connection (option 1 above)
+4. `appsettings.json` (+ `appsettings.{Environment}.json`) in the project directory — the single
+   `ConnectionStrings` entry is used automatically; if there are several, pass `--connection-name <key>`.
+
+**Where migrations go.** With `--project`, migrations default to `<project>/Migrations`. Override with
+`--output <dir>`. `add-migration` diffs your model against the live database, so the database must be at
+the latest applied migration first (`velo` tells you to run `update-database` if it is behind).
 
 ---
 
@@ -447,8 +476,51 @@ The connection string can also be supplied through the `VELO_CONNECTION` environ
 Reverse-engineer entity classes and a context from an existing database:
 
 ```bash
-velo scaffold --connection "Host=...;Database=veloorm" --namespace MyApp.Data --context AppContext
+velo scaffold --connection "Host=...;Database=veloorm" --namespace MyApp.Data --context-name AppContext
 ```
+
+Existing files are preserved; pass `--force` to overwrite them. (`--context-name` sets the generated
+context class name; `--context` is still accepted as an alias.)
+
+---
+
+## Working with DateTime and PostgreSQL
+
+PostgreSQL has two timestamp types, and Npgsql maps them by CLR type:
+
+| CLR type          | PostgreSQL type              | Time zone |
+| ----------------- | ---------------------------- | --------- |
+| `DateTime`        | `timestamp` (without tz)     | no        |
+| `DateTimeOffset`  | `timestamptz` (with tz)      | yes       |
+
+The most common Npgsql pitfall is writing a `DateTime.UtcNow` (which has `Kind == Utc`) into a
+`timestamp without time zone` column — Npgsql rejects it. **VeloORM handles this for you:** every
+`DateTime` is stored as `DateTimeKind.Unspecified` on write (the clock is not shifted), so writes never
+throw regardless of the value's `Kind`. Reads from a `timestamp` column come back as
+`DateTimeKind.Unspecified`.
+
+If you want round-tripped values stamped back as UTC, opt in — per property or model-wide:
+
+```csharp
+// Per property:
+public class Order
+{
+    public int Id { get; set; }
+    [UtcDateTime] public DateTime CreatedAt { get; set; }   // read back as Kind=Utc
+}
+
+// Or via fluent config:
+b.Entity<Order>().Property(o => o.CreatedAt).AsUtc();
+
+// Or model-wide — treat every DateTime column as UTC:
+VeloModel.Build([typeof(Order)], options: new VeloModelOptions { NormalizeDateTimesToUtc = true });
+```
+
+Use `DateTimeOffset` when you need genuine time-zone-aware storage (`timestamptz`).
+
+> Note: the read-side UTC stamping is applied by the runtime engine. Queries carrying `[UtcDateTime]`
+> automatically run on the runtime engine (the compile-time interceptor defers to it) so the `Kind` is
+> always correct.
 
 ---
 
